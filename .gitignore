@@ -22,3 +22,7 @@ dist/
 *.dlq.jsonl
 working-example/state/
 examples/test.yaml
+
+VortaraOS.jsx
+coverage.txt
+vortara-architecture.docx
