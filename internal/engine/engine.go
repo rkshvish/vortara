@@ -133,7 +133,7 @@ func (e *Engine) Stats(ctx context.Context) PipelineStats {
 	default:
 	}
 	if e.store != nil {
-		if lastRun, err := e.store.GetLastRun(e.cfg.Name); err == nil {
+		if lastRun, err := e.store.GetLastRun(ctx, e.cfg.Name); err == nil {
 			stats.LastRunAt = lastRun.StartedAt
 			if !lastRun.FinishedAt.IsZero() {
 				stats.LastRunDuration = lastRun.FinishedAt.Sub(lastRun.StartedAt)

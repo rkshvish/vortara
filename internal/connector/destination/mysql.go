@@ -161,7 +161,7 @@ func (m *MySQLDestination) Load(ctx context.Context, rows []row.Row, store state
 			return result, err
 		}
 		if !skipDeliveryCheck {
-			delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+			delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 			if err != nil {
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
@@ -245,19 +245,19 @@ func (m *MySQLDestination) writeChunk(ctx context.Context, cols []string, batch 
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: rowErr})
 				continue
 			}
-			m.markLoaded(rw, store, pipeline, destination, result)
+			m.markLoaded(ctx, rw, store, pipeline, destination, result)
 		}
 		return nil
 	}
 	for _, rw := range batch {
-		m.markLoaded(rw, store, pipeline, destination, result)
+		m.markLoaded(ctx, rw, store, pipeline, destination, result)
 	}
 	return nil
 }
 
-func (m *MySQLDestination) markLoaded(rw row.Row, store state.StateStore, pipeline, destination string, result *LoadResult) {
+func (m *MySQLDestination) markLoaded(ctx context.Context, rw row.Row, store state.StateStore, pipeline, destination string, result *LoadResult) {
 	if m.strategy == "merge" || m.strategy == "delete+insert" {
-		if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			return
 		}

@@ -135,7 +135,7 @@ func (s *SalesforceDestination) loadREST(ctx context.Context, rows []row.Row, st
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -175,7 +175,7 @@ func (s *SalesforceDestination) loadREST(ctx context.Context, rows []row.Row, st
 				mu.Unlock()
 				return
 			}
-			if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+			if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 				mu.Lock()
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				mu.Unlock()
@@ -294,7 +294,7 @@ func (s *SalesforceDestination) loadBulk(ctx context.Context, rows []row.Row, st
 	var result LoadResult
 	pending := make([]row.Row, 0, len(rows))
 	for _, rw := range rows {
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -325,7 +325,7 @@ func (s *SalesforceDestination) loadBulk(ctx context.Context, rows []row.Row, st
 	}
 	loaded, errs := s.readBulkResults(ctx, destName, jobID, len(pending), pending)
 	for _, rw := range pending {
-		if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}

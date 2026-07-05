@@ -22,9 +22,10 @@ func newTestStore(t *testing.T) *SQLiteStore {
 
 // TestSQLiteStore_Watermark verifies watermark reads and writes.
 func TestSQLiteStore_Watermark(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
-	wm, err := store.GetWatermark("pipeline-a", "source-a")
+	wm, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -33,11 +34,11 @@ func TestSQLiteStore_Watermark(t *testing.T) {
 	}
 
 	first := time.Now().UTC().Truncate(time.Second)
-	if err := store.SetWatermark("pipeline-a", "source-a", first); err != nil {
+	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", first); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
 
-	got, err := store.GetWatermark("pipeline-a", "source-a")
+	got, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -46,11 +47,11 @@ func TestSQLiteStore_Watermark(t *testing.T) {
 	}
 
 	second := first.Add(2 * time.Minute)
-	if err := store.SetWatermark("pipeline-a", "source-a", second); err != nil {
+	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", second); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
 
-	got, err = store.GetWatermark("pipeline-a", "source-a")
+	got, err = store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -61,9 +62,10 @@ func TestSQLiteStore_Watermark(t *testing.T) {
 
 // TestSQLiteStore_KafkaOffset verifies offset reads and writes.
 func TestSQLiteStore_KafkaOffset(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
-	offset, err := store.GetOffset("pipeline-a", "topic-a", 0)
+	offset, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -71,11 +73,11 @@ func TestSQLiteStore_KafkaOffset(t *testing.T) {
 		t.Fatalf("expected -1 offset, got %d", offset)
 	}
 
-	if err := store.SetOffset("pipeline-a", "topic-a", 0, 42); err != nil {
+	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 42); err != nil {
 		t.Fatalf("SetOffset() error = %v", err)
 	}
 
-	got, err := store.GetOffset("pipeline-a", "topic-a", 0)
+	got, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -83,11 +85,11 @@ func TestSQLiteStore_KafkaOffset(t *testing.T) {
 		t.Fatalf("expected 42, got %d", got)
 	}
 
-	if err := store.SetOffset("pipeline-a", "topic-a", 0, 99); err != nil {
+	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 99); err != nil {
 		t.Fatalf("SetOffset() error = %v", err)
 	}
 
-	got, err = store.GetOffset("pipeline-a", "topic-a", 0)
+	got, err = store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -98,13 +100,14 @@ func TestSQLiteStore_KafkaOffset(t *testing.T) {
 
 // TestSQLiteStore_RunLog verifies run creation, update, and lookup.
 func TestSQLiteStore_RunLog(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
-	if _, err := store.GetLastRun("pipeline-a"); err == nil {
+	if _, err := store.GetLastRun(ctx, "pipeline-a"); err == nil {
 		t.Fatal("expected error for empty run log")
 	}
 
-	runID, err := store.StartRun("pipeline-a", "batch")
+	runID, err := store.StartRun(ctx, "pipeline-a", "batch")
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
@@ -120,11 +123,11 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 		Status:        "failed",
 		Error:         "boom",
 	}
-	if err := store.FinishRun(runID, stats); err != nil {
+	if err := store.FinishRun(ctx, runID, stats); err != nil {
 		t.Fatalf("FinishRun() error = %v", err)
 	}
 
-	secondRunID, err := store.StartRun("pipeline-a", "batch")
+	secondRunID, err := store.StartRun(ctx, "pipeline-a", "batch")
 	if err != nil {
 		t.Fatalf("StartRun() second error = %v", err)
 	}
@@ -132,7 +135,7 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 		t.Fatalf("expected later run ID, got %d after %d", secondRunID, runID)
 	}
 
-	got, err := store.GetLastRun("pipeline-a")
+	got, err := store.GetLastRun(ctx, "pipeline-a")
 	if err != nil {
 		t.Fatalf("GetLastRun() error = %v", err)
 	}
@@ -143,9 +146,10 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 
 // TestSQLiteStore_Delivery verifies delivery idempotency tracking.
 func TestSQLiteStore_Delivery(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
-	ok, err := store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -153,14 +157,14 @@ func TestSQLiteStore_Delivery(t *testing.T) {
 		t.Fatal("expected row to be undelivered")
 	}
 
-	if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() second call error = %v", err)
 	}
 
-	ok, err = store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -170,17 +174,18 @@ func TestSQLiteStore_Delivery(t *testing.T) {
 }
 
 func TestSQLiteStore_BeginBatch_BuffersWrites(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+		if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 			t.Fatalf("MarkDelivered() error = %v", err)
 		}
 	}
-	ok, err := store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -197,13 +202,14 @@ func TestSQLiteStore_BeginBatch_BuffersWrites(t *testing.T) {
 }
 
 func TestSQLiteStore_CommitBatch_WritesAll(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 100; i++ {
-		if err := store.MarkDelivered(
+		if err := store.MarkDelivered(ctx, 
 			"row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano),
 			"pipeline-a",
 			"dest-a",
@@ -224,20 +230,21 @@ func TestSQLiteStore_CommitBatch_WritesAll(t *testing.T) {
 }
 
 func TestSQLiteStore_RollbackBatch_DiscardsPending(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := store.MarkDelivered("row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano), "pipeline-a", "dest-a"); err != nil {
+		if err := store.MarkDelivered(ctx, "row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano), "pipeline-a", "dest-a"); err != nil {
 			t.Fatalf("MarkDelivered() error = %v", err)
 		}
 	}
 	if err := store.RollbackBatch(); err != nil {
 		t.Fatalf("RollbackBatch() error = %v", err)
 	}
-	ok, err := store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -254,32 +261,33 @@ func TestSQLiteStore_RollbackBatch_DiscardsPending(t *testing.T) {
 }
 
 func TestSQLiteStore_IsDelivered_ChecksBoth(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
-	if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
-	if err := store.MarkDelivered("row-2", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-2", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	ok, err := store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
 	if !ok {
 		t.Fatal("expected committed row to be visible")
 	}
-	ok, err = store.IsDelivered("row-2", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-2", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
 	if !ok {
 		t.Fatal("expected pending row to be visible")
 	}
-	ok, err = store.IsDelivered("row-3", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-3", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -289,6 +297,7 @@ func TestSQLiteStore_IsDelivered_ChecksBoth(t *testing.T) {
 }
 
 func TestSQLiteStore_BatchConcurrent(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
@@ -301,7 +310,7 @@ func TestSQLiteStore_BatchConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- store.MarkDelivered(
+			errs <- store.MarkDelivered(ctx, 
 				"row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano),
 				"pipeline-a",
 				"dest-a",
@@ -329,6 +338,7 @@ func TestSQLiteStore_BatchConcurrent(t *testing.T) {
 
 // TestSQLiteStore_Concurrent verifies concurrent writes do not race or error.
 func TestSQLiteStore_Concurrent(t *testing.T) {
+	ctx := context.Background()
 	store := newTestStore(t)
 
 	var wg sync.WaitGroup
@@ -338,7 +348,7 @@ func TestSQLiteStore_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- store.SetWatermark("pipeline-a", "source-"+string(rune('a'+i)), time.Unix(int64(i), 0).UTC())
+			errs <- store.SetWatermark(ctx, "pipeline-a", "source-"+string(rune('a'+i)), time.Unix(int64(i), 0).UTC())
 		}()
 	}
 	wg.Wait()

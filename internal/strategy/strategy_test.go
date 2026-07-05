@@ -68,6 +68,7 @@ func TestReplaceStrategy_RequiresPrimaryKey(t *testing.T) {
 }
 
 func TestMergeStrategy_Execute_Success(t *testing.T) {
+	ctx := context.Background()
 	store := state.NewMemoryStore()
 	rw := row.NewRow("source", "pipe", "id=1", map[string]interface{}{"id": 1}, time.Now())
 	dest := &mockDestination{result: destination.LoadResult{Loaded: 1}}
@@ -79,7 +80,7 @@ func TestMergeStrategy_Execute_Success(t *testing.T) {
 	if res.Loaded != 1 {
 		t.Fatalf("Loaded = %d, want 1", res.Loaded)
 	}
-	if ok, err := store.IsDelivered(rw.ID, "pipe", "dest"); err != nil || !ok {
+	if ok, err := store.IsDelivered(ctx, rw.ID, "pipe", "dest"); err != nil || !ok {
 		t.Fatalf("IsDelivered() = %v, %v; want true, nil", ok, err)
 	}
 	if dest.loadCalls != 1 {
@@ -88,9 +89,10 @@ func TestMergeStrategy_Execute_Success(t *testing.T) {
 }
 
 func TestMergeStrategy_Execute_AlreadyDelivered(t *testing.T) {
+	ctx := context.Background()
 	store := state.NewMemoryStore()
 	rw := row.NewRow("source", "pipe", "id=1", map[string]interface{}{"id": 1}, time.Now())
-	if err := store.MarkDelivered(rw.ID, "pipe", "dest"); err != nil {
+	if err := store.MarkDelivered(ctx, rw.ID, "pipe", "dest"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 	dest := &mockDestination{result: destination.LoadResult{Loaded: 1}}
@@ -108,9 +110,10 @@ func TestMergeStrategy_Execute_AlreadyDelivered(t *testing.T) {
 }
 
 func TestAppendStrategy_Execute_SkipsDeliveryCheck(t *testing.T) {
+	ctx := context.Background()
 	store := state.NewMemoryStore()
 	rw := row.NewRow("source", "pipe", "id=1", map[string]interface{}{"id": 1}, time.Now())
-	if err := store.MarkDelivered(rw.ID, "pipe", "dest"); err != nil {
+	if err := store.MarkDelivered(ctx, rw.ID, "pipe", "dest"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 	dest := &mockDestination{result: destination.LoadResult{Loaded: 1}}

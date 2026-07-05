@@ -60,14 +60,14 @@ func deliveryKey(rowID, pipeline, destination string) string {
 }
 
 // GetNumericWatermark returns the last integer cursor for a pipeline+source.
-func (s *MemoryStore) GetNumericWatermark(pipeline, source string) (int64, error) {
+func (s *MemoryStore) GetNumericWatermark(ctx context.Context, pipeline, source string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.numericWatermarks[watermarkKey(pipeline, source)], nil
 }
 
 // SetNumericWatermark saves the integer cursor for a pipeline+source.
-func (s *MemoryStore) SetNumericWatermark(pipeline, source string, wm int64) error {
+func (s *MemoryStore) SetNumericWatermark(ctx context.Context, pipeline, source string, wm int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numericWatermarks == nil {
@@ -78,7 +78,7 @@ func (s *MemoryStore) SetNumericWatermark(pipeline, source string, wm int64) err
 }
 
 // GetWatermark returns the last processed watermark for a pipeline and source.
-func (s *MemoryStore) GetWatermark(pipeline, source string) (time.Time, error) {
+func (s *MemoryStore) GetWatermark(ctx context.Context, pipeline, source string) (time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -89,7 +89,7 @@ func (s *MemoryStore) GetWatermark(pipeline, source string) (time.Time, error) {
 }
 
 // SetWatermark saves the watermark for a pipeline and source.
-func (s *MemoryStore) SetWatermark(pipeline, source string, wm time.Time) error {
+func (s *MemoryStore) SetWatermark(ctx context.Context, pipeline, source string, wm time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (s *MemoryStore) SetWatermark(pipeline, source string, wm time.Time) error 
 }
 
 // GetOffset returns the last committed offset for a pipeline, topic, and partition.
-func (s *MemoryStore) GetOffset(pipeline, topic string, partition int) (int64, error) {
+func (s *MemoryStore) GetOffset(ctx context.Context, pipeline, topic string, partition int) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -109,7 +109,7 @@ func (s *MemoryStore) GetOffset(pipeline, topic string, partition int) (int64, e
 }
 
 // SetOffset saves the committed offset for a pipeline, topic, and partition.
-func (s *MemoryStore) SetOffset(pipeline, topic string, partition int, offset int64) error {
+func (s *MemoryStore) SetOffset(ctx context.Context, pipeline, topic string, partition int, offset int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -118,7 +118,7 @@ func (s *MemoryStore) SetOffset(pipeline, topic string, partition int, offset in
 }
 
 // StartRun creates a new run log entry and returns its ID.
-func (s *MemoryStore) StartRun(pipeline, mode string) (int64, error) {
+func (s *MemoryStore) StartRun(ctx context.Context, pipeline, mode string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (s *MemoryStore) StartRun(pipeline, mode string) (int64, error) {
 }
 
 // FinishRun updates a run log entry with final statistics.
-func (s *MemoryStore) FinishRun(runID int64, stats RunStats) error {
+func (s *MemoryStore) FinishRun(ctx context.Context, runID int64, stats RunStats) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -156,8 +156,8 @@ func (s *MemoryStore) FinishRun(runID int64, stats RunStats) error {
 }
 
 // GetLastRun returns the most recent run log entry for a pipeline.
-func (s *MemoryStore) GetLastRun(pipeline string) (RunLog, error) {
-	history, err := s.GetRunHistory(pipeline, 1)
+func (s *MemoryStore) GetLastRun(ctx context.Context, pipeline string) (RunLog, error) {
+	history, err := s.GetRunHistory(ctx, pipeline, 1)
 	if err != nil {
 		return RunLog{}, err
 	}
@@ -168,7 +168,7 @@ func (s *MemoryStore) GetLastRun(pipeline string) (RunLog, error) {
 }
 
 // GetRunHistory returns the most recent run log entries for a pipeline.
-func (s *MemoryStore) GetRunHistory(pipeline string, limit int) ([]RunLog, error) {
+func (s *MemoryStore) GetRunHistory(ctx context.Context, pipeline string, limit int) ([]RunLog, error) {
 	if limit <= 0 {
 		return []RunLog{}, nil
 	}
@@ -196,7 +196,7 @@ func (s *MemoryStore) GetRunHistory(pipeline string, limit int) ([]RunLog, error
 }
 
 // IsDelivered reports whether a row has already been delivered.
-func (s *MemoryStore) IsDelivered(rowID, pipeline, destination string) (bool, error) {
+func (s *MemoryStore) IsDelivered(ctx context.Context, rowID, pipeline, destination string) (bool, error) {
 	key := deliveryKey(rowID, pipeline, destination)
 	s.batchMu.Lock()
 	if s.inBatch && s.pending[key] {
@@ -212,7 +212,7 @@ func (s *MemoryStore) IsDelivered(rowID, pipeline, destination string) (bool, er
 }
 
 // MarkDelivered records that a row was successfully delivered.
-func (s *MemoryStore) MarkDelivered(rowID, pipeline, destination string) error {
+func (s *MemoryStore) MarkDelivered(ctx context.Context, rowID, pipeline, destination string) error {
 	key := deliveryKey(rowID, pipeline, destination)
 	s.batchMu.Lock()
 	if s.inBatch {
@@ -230,7 +230,7 @@ func (s *MemoryStore) MarkDelivered(rowID, pipeline, destination string) error {
 }
 
 // PruneDelivered is a no-op for the in-memory store (no timestamps kept).
-func (s *MemoryStore) PruneDelivered(olderThan time.Time) (int64, error) {
+func (s *MemoryStore) PruneDelivered(ctx context.Context, olderThan time.Time) (int64, error) {
 	return 0, nil
 }
 

@@ -70,7 +70,7 @@ func (e *Extractor) Extract(ctx context.Context, out chan<- row.Row) (newWaterma
 	defer close(out)
 
 	l := vlogger.FromContext(ctx)
-	wm, err := e.store.GetWatermark(e.pipeline, e.srcName)
+	wm, err := e.store.GetWatermark(ctx, e.pipeline, e.srcName)
 	if err != nil {
 		return time.Time{}, err
 	}

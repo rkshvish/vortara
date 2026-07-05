@@ -134,9 +134,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 }
 
 // GetWatermark returns the last processed watermark for a pipeline+source.
-func (s *PostgresStore) GetWatermark(pipeline, source string) (time.Time, error) {
+func (s *PostgresStore) GetWatermark(ctx context.Context, pipeline, source string) (time.Time, error) {
 	var wm time.Time
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx, 
 		`SELECT watermark FROM `+s.table("watermarks")+` WHERE pipeline=$1 AND source=$2`,
 		pipeline, source,
 	).Scan(&wm)
@@ -150,8 +150,8 @@ func (s *PostgresStore) GetWatermark(pipeline, source string) (time.Time, error)
 }
 
 // SetWatermark saves the watermark for a pipeline+source.
-func (s *PostgresStore) SetWatermark(pipeline, source string, wm time.Time) error {
-	_, err := s.db.Exec(
+func (s *PostgresStore) SetWatermark(ctx context.Context, pipeline, source string, wm time.Time) error {
+	_, err := s.db.ExecContext(ctx, 
 		`INSERT INTO `+s.table("watermarks")+` (pipeline, source, watermark, updated_at)
 		 VALUES ($1, $2, $3, NOW())
 		 ON CONFLICT (pipeline, source) DO UPDATE SET watermark = EXCLUDED.watermark, updated_at = NOW()`,
@@ -161,9 +161,9 @@ func (s *PostgresStore) SetWatermark(pipeline, source string, wm time.Time) erro
 }
 
 // GetNumericWatermark returns the last integer cursor for a pipeline+source.
-func (s *PostgresStore) GetNumericWatermark(pipeline, source string) (int64, error) {
+func (s *PostgresStore) GetNumericWatermark(ctx context.Context, pipeline, source string) (int64, error) {
 	var wm int64
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx, 
 		`SELECT watermark FROM `+s.table("numeric_watermarks")+` WHERE pipeline=$1 AND source=$2`,
 		pipeline, source,
 	).Scan(&wm)
@@ -174,8 +174,8 @@ func (s *PostgresStore) GetNumericWatermark(pipeline, source string) (int64, err
 }
 
 // SetNumericWatermark saves the integer cursor for a pipeline+source.
-func (s *PostgresStore) SetNumericWatermark(pipeline, source string, wm int64) error {
-	_, err := s.db.Exec(
+func (s *PostgresStore) SetNumericWatermark(ctx context.Context, pipeline, source string, wm int64) error {
+	_, err := s.db.ExecContext(ctx, 
 		`INSERT INTO `+s.table("numeric_watermarks")+` (pipeline, source, watermark, updated_at)
 		 VALUES ($1, $2, $3, NOW())
 		 ON CONFLICT (pipeline, source) DO UPDATE SET watermark = EXCLUDED.watermark, updated_at = NOW()`,
@@ -185,9 +185,9 @@ func (s *PostgresStore) SetNumericWatermark(pipeline, source string, wm int64) e
 }
 
 // GetOffset returns the last committed offset, or -1 when unset.
-func (s *PostgresStore) GetOffset(pipeline, topic string, partition int) (int64, error) {
+func (s *PostgresStore) GetOffset(ctx context.Context, pipeline, topic string, partition int) (int64, error) {
 	var offset int64
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx, 
 		`SELECT commit_offset FROM `+s.table("kafka_offsets")+` WHERE pipeline=$1 AND topic=$2 AND partition=$3`,
 		pipeline, topic, partition,
 	).Scan(&offset)
@@ -201,8 +201,8 @@ func (s *PostgresStore) GetOffset(pipeline, topic string, partition int) (int64,
 }
 
 // SetOffset saves the committed offset for a topic+partition.
-func (s *PostgresStore) SetOffset(pipeline, topic string, partition int, offset int64) error {
-	_, err := s.db.Exec(
+func (s *PostgresStore) SetOffset(ctx context.Context, pipeline, topic string, partition int, offset int64) error {
+	_, err := s.db.ExecContext(ctx, 
 		`INSERT INTO `+s.table("kafka_offsets")+` (pipeline, topic, partition, commit_offset)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (pipeline, topic, partition) DO UPDATE SET commit_offset = EXCLUDED.commit_offset`,
@@ -212,9 +212,9 @@ func (s *PostgresStore) SetOffset(pipeline, topic string, partition int, offset 
 }
 
 // StartRun creates a new run log entry and returns its ID.
-func (s *PostgresStore) StartRun(pipeline, mode string) (int64, error) {
+func (s *PostgresStore) StartRun(ctx context.Context, pipeline, mode string) (int64, error) {
 	var id int64
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx, 
 		`INSERT INTO `+s.table("run_log")+` (pipeline, mode, started_at, status)
 		 VALUES ($1, $2, NOW(), 'running') RETURNING id`,
 		pipeline, mode,
@@ -223,8 +223,8 @@ func (s *PostgresStore) StartRun(pipeline, mode string) (int64, error) {
 }
 
 // FinishRun updates the run log entry with final stats.
-func (s *PostgresStore) FinishRun(runID int64, stats RunStats) error {
-	_, err := s.db.Exec(
+func (s *PostgresStore) FinishRun(ctx context.Context, runID int64, stats RunStats) error {
+	_, err := s.db.ExecContext(ctx, 
 		`UPDATE `+s.table("run_log")+`
 		 SET finished_at=NOW(), rows_extracted=$1, rows_loaded=$2, rows_skipped=$3,
 		     rows_errored=$4, status=$5, error=$6
@@ -236,8 +236,8 @@ func (s *PostgresStore) FinishRun(runID int64, stats RunStats) error {
 }
 
 // GetLastRun returns the most recent run log entry for a pipeline.
-func (s *PostgresStore) GetLastRun(pipeline string) (RunLog, error) {
-	runs, err := s.GetRunHistory(pipeline, 1)
+func (s *PostgresStore) GetLastRun(ctx context.Context, pipeline string) (RunLog, error) {
+	runs, err := s.GetRunHistory(ctx, pipeline, 1)
 	if err != nil {
 		return RunLog{}, err
 	}
@@ -248,11 +248,11 @@ func (s *PostgresStore) GetLastRun(pipeline string) (RunLog, error) {
 }
 
 // GetRunHistory returns the most recent run log entries for a pipeline.
-func (s *PostgresStore) GetRunHistory(pipeline string, limit int) ([]RunLog, error) {
+func (s *PostgresStore) GetRunHistory(ctx context.Context, pipeline string, limit int) ([]RunLog, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx, 
 		`SELECT id, pipeline, mode, started_at, COALESCE(finished_at, 'epoch'::timestamptz),
 		        rows_extracted, rows_loaded, rows_skipped, rows_errored, status, error
 		 FROM `+s.table("run_log")+` WHERE pipeline=$1 ORDER BY id DESC LIMIT $2`,
@@ -282,7 +282,7 @@ func (s *PostgresStore) GetRunHistory(pipeline string, limit int) ([]RunLog, err
 }
 
 // IsDelivered reports whether a row was already delivered.
-func (s *PostgresStore) IsDelivered(rowID, pipeline, destination string) (bool, error) {
+func (s *PostgresStore) IsDelivered(ctx context.Context, rowID, pipeline, destination string) (bool, error) {
 	s.batchMu.Lock()
 	if s.inBatch {
 		if _, seen := s.batchSeen[deliveryKey(rowID, pipeline, destination)]; seen {
@@ -293,7 +293,7 @@ func (s *PostgresStore) IsDelivered(rowID, pipeline, destination string) (bool, 
 	s.batchMu.Unlock()
 
 	var one int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx, 
 		`SELECT 1 FROM `+s.table("delivery_log")+` WHERE row_id=$1 AND pipeline=$2 AND destination=$3`,
 		rowID, pipeline, destination,
 	).Scan(&one)
@@ -304,7 +304,7 @@ func (s *PostgresStore) IsDelivered(rowID, pipeline, destination string) (bool, 
 }
 
 // MarkDelivered records that a row was successfully delivered.
-func (s *PostgresStore) MarkDelivered(rowID, pipeline, destination string) error {
+func (s *PostgresStore) MarkDelivered(ctx context.Context, rowID, pipeline, destination string) error {
 	s.batchMu.Lock()
 	if s.inBatch {
 		s.batchPending = append(s.batchPending, deliveryEntry{
@@ -321,7 +321,7 @@ func (s *PostgresStore) MarkDelivered(rowID, pipeline, destination string) error
 	}
 	s.batchMu.Unlock()
 
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(ctx, 
 		`INSERT INTO `+s.table("delivery_log")+` (row_id, pipeline, destination)
 		 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		rowID, pipeline, destination,
@@ -330,8 +330,8 @@ func (s *PostgresStore) MarkDelivered(rowID, pipeline, destination string) error
 }
 
 // PruneDelivered deletes delivery-log entries older than the cutoff.
-func (s *PostgresStore) PruneDelivered(olderThan time.Time) (int64, error) {
-	res, err := s.db.Exec(
+func (s *PostgresStore) PruneDelivered(ctx context.Context, olderThan time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, 
 		`DELETE FROM `+s.table("delivery_log")+` WHERE delivered_at < $1`,
 		olderThan.UTC(),
 	)

@@ -223,6 +223,7 @@ func TestConformance_IdempotentReload(t *testing.T) {
 }
 
 func TestConformance_FailedRowsNotMarkedDelivered(t *testing.T) {
+	ctx := context.Background()
 	for name, mk := range conformanceTargets {
 		t.Run(name, func(t *testing.T) {
 			tgt := mk(t)
@@ -237,7 +238,7 @@ func TestConformance_FailedRowsNotMarkedDelivered(t *testing.T) {
 			if res.Loaded != 0 {
 				t.Fatalf("failing Load reported %d loaded, want 0", res.Loaded)
 			}
-			delivered, _ := store.IsDelivered(rows[0].ID, "p", name)
+			delivered, _ := store.IsDelivered(ctx, rows[0].ID, "p", name)
 			if delivered {
 				t.Fatal("failed row was marked delivered")
 			}

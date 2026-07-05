@@ -37,7 +37,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	runs, err := store.GetRunHistory(cfg.Name, historyLimit)
+	runs, err := store.GetRunHistory(cmd.Context(), cfg.Name, historyLimit)
 	if err != nil {
 		return err
 	}

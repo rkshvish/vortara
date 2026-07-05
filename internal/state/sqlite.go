@@ -141,9 +141,10 @@ func ensureDir(dir string) error {
 }
 
 func (s *SQLiteStore) init() error {
+	ctx := context.Background()
 	pragmas := []string{journalModeWAL, synchronousNorm, foreignKeysOn, busyTimeout}
 	for _, pragma := range pragmas {
-		if _, err := s.db.Exec(pragma); err != nil {
+		if _, err := s.db.ExecContext(ctx, pragma); err != nil {
 			return fmt.Errorf("state: apply pragma %q: %w", pragma, err)
 		}
 	}
@@ -157,7 +158,7 @@ func (s *SQLiteStore) init() error {
 	}
 
 	for _, stmt := range stmts {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("state: create schema: %w", err)
 		}
 	}
@@ -171,8 +172,8 @@ func (s *SQLiteStore) Close() error {
 }
 
 // GetWatermark returns the last processed watermark for a pipeline and source.
-func (s *SQLiteStore) GetWatermark(pipeline, source string) (time.Time, error) {
-	row := s.db.QueryRow(`SELECT watermark FROM watermarks WHERE pipeline=? AND source=?`, pipeline, source)
+func (s *SQLiteStore) GetWatermark(ctx context.Context, pipeline, source string) (time.Time, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT watermark FROM watermarks WHERE pipeline=? AND source=?`, pipeline, source)
 	var wm time.Time
 	if err := row.Scan(&wm); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -184,14 +185,14 @@ func (s *SQLiteStore) GetWatermark(pipeline, source string) (time.Time, error) {
 }
 
 // SetWatermark saves the watermark for a pipeline and source.
-func (s *SQLiteStore) SetWatermark(pipeline, source string, wm time.Time) error {
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO watermarks (pipeline, source, watermark) VALUES (?, ?, ?)`, pipeline, source, wm.UTC())
+func (s *SQLiteStore) SetWatermark(ctx context.Context, pipeline, source string, wm time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO watermarks (pipeline, source, watermark) VALUES (?, ?, ?)`, pipeline, source, wm.UTC())
 	return err
 }
 
 // GetNumericWatermark returns the last integer cursor for a pipeline+source.
-func (s *SQLiteStore) GetNumericWatermark(pipeline, source string) (int64, error) {
-	row := s.db.QueryRow(`SELECT watermark FROM numeric_watermarks WHERE pipeline=? AND source=?`, pipeline, source)
+func (s *SQLiteStore) GetNumericWatermark(ctx context.Context, pipeline, source string) (int64, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT watermark FROM numeric_watermarks WHERE pipeline=? AND source=?`, pipeline, source)
 	var wm int64
 	if err := row.Scan(&wm); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -203,14 +204,14 @@ func (s *SQLiteStore) GetNumericWatermark(pipeline, source string) (int64, error
 }
 
 // SetNumericWatermark saves the integer cursor for a pipeline+source.
-func (s *SQLiteStore) SetNumericWatermark(pipeline, source string, wm int64) error {
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO numeric_watermarks (pipeline, source, watermark) VALUES (?, ?, ?)`, pipeline, source, wm)
+func (s *SQLiteStore) SetNumericWatermark(ctx context.Context, pipeline, source string, wm int64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO numeric_watermarks (pipeline, source, watermark) VALUES (?, ?, ?)`, pipeline, source, wm)
 	return err
 }
 
 // GetOffset returns the last committed offset for a pipeline, topic, and partition.
-func (s *SQLiteStore) GetOffset(pipeline, topic string, partition int) (int64, error) {
-	row := s.db.QueryRow(`SELECT offset FROM kafka_offsets WHERE pipeline=? AND topic=? AND partition=?`, pipeline, topic, partition)
+func (s *SQLiteStore) GetOffset(ctx context.Context, pipeline, topic string, partition int) (int64, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT offset FROM kafka_offsets WHERE pipeline=? AND topic=? AND partition=?`, pipeline, topic, partition)
 	var offset int64
 	if err := row.Scan(&offset); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -222,14 +223,14 @@ func (s *SQLiteStore) GetOffset(pipeline, topic string, partition int) (int64, e
 }
 
 // SetOffset saves the committed offset for a pipeline, topic, and partition.
-func (s *SQLiteStore) SetOffset(pipeline, topic string, partition int, offset int64) error {
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO kafka_offsets (pipeline, topic, partition, offset) VALUES (?, ?, ?, ?)`, pipeline, topic, partition, offset)
+func (s *SQLiteStore) SetOffset(ctx context.Context, pipeline, topic string, partition int, offset int64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO kafka_offsets (pipeline, topic, partition, offset) VALUES (?, ?, ?, ?)`, pipeline, topic, partition, offset)
 	return err
 }
 
 // StartRun creates a new run log entry and returns its ID.
-func (s *SQLiteStore) StartRun(pipeline, mode string) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO run_log (pipeline, mode, started_at, status) VALUES (?, ?, ?, 'running')`, pipeline, mode, time.Now().UTC())
+func (s *SQLiteStore) StartRun(ctx context.Context, pipeline, mode string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `INSERT INTO run_log (pipeline, mode, started_at, status) VALUES (?, ?, ?, 'running')`, pipeline, mode, time.Now().UTC())
 	if err != nil {
 		return 0, err
 	}
@@ -237,8 +238,8 @@ func (s *SQLiteStore) StartRun(pipeline, mode string) (int64, error) {
 }
 
 // FinishRun updates a run log entry with final statistics.
-func (s *SQLiteStore) FinishRun(runID int64, stats RunStats) error {
-	_, err := s.db.Exec(
+func (s *SQLiteStore) FinishRun(ctx context.Context, runID int64, stats RunStats) error {
+	_, err := s.db.ExecContext(ctx, 
 		`UPDATE run_log SET finished_at=?, rows_extracted=?, rows_loaded=?, rows_skipped=?, rows_errored=?, status=?, error=? WHERE id=?`,
 		time.Now().UTC(),
 		stats.RowsExtracted,
@@ -253,8 +254,8 @@ func (s *SQLiteStore) FinishRun(runID int64, stats RunStats) error {
 }
 
 // GetLastRun returns the most recent run log entry for a pipeline.
-func (s *SQLiteStore) GetLastRun(pipeline string) (RunLog, error) {
-	history, err := s.GetRunHistory(pipeline, 1)
+func (s *SQLiteStore) GetLastRun(ctx context.Context, pipeline string) (RunLog, error) {
+	history, err := s.GetRunHistory(ctx, pipeline, 1)
 	if err != nil {
 		return RunLog{}, err
 	}
@@ -265,12 +266,12 @@ func (s *SQLiteStore) GetLastRun(pipeline string) (RunLog, error) {
 }
 
 // GetRunHistory returns the most recent run log entries for a pipeline.
-func (s *SQLiteStore) GetRunHistory(pipeline string, limit int) ([]RunLog, error) {
+func (s *SQLiteStore) GetRunHistory(ctx context.Context, pipeline string, limit int) ([]RunLog, error) {
 	if limit <= 0 {
 		return []RunLog{}, nil
 	}
 
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(ctx, 
 		`SELECT id, pipeline, mode, started_at, finished_at, rows_extracted, rows_loaded, rows_skipped, rows_errored, status, error
 		 FROM run_log WHERE pipeline=? ORDER BY started_at DESC, id DESC LIMIT ?`,
 		pipeline,
@@ -296,7 +297,7 @@ func (s *SQLiteStore) GetRunHistory(pipeline string, limit int) ([]RunLog, error
 }
 
 // IsDelivered reports whether a row has already been delivered.
-func (s *SQLiteStore) IsDelivered(rowID, pipeline, destination string) (bool, error) {
+func (s *SQLiteStore) IsDelivered(ctx context.Context, rowID, pipeline, destination string) (bool, error) {
 	s.batchMu.Lock()
 	if s.inBatch {
 		if _, seen := s.batchSeen[deliveryKey(rowID, pipeline, destination)]; seen {
@@ -306,7 +307,7 @@ func (s *SQLiteStore) IsDelivered(rowID, pipeline, destination string) (bool, er
 	}
 	s.batchMu.Unlock()
 
-	row := s.db.QueryRow(`SELECT COUNT(*) FROM delivery_log WHERE row_id=? AND pipeline=? AND destination=?`, rowID, pipeline, destination)
+	row := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_log WHERE row_id=? AND pipeline=? AND destination=?`, rowID, pipeline, destination)
 	var count int
 	if err := row.Scan(&count); err != nil {
 		return false, err
@@ -315,7 +316,7 @@ func (s *SQLiteStore) IsDelivered(rowID, pipeline, destination string) (bool, er
 }
 
 // MarkDelivered records that a row was successfully delivered.
-func (s *SQLiteStore) MarkDelivered(rowID, pipeline, destination string) error {
+func (s *SQLiteStore) MarkDelivered(ctx context.Context, rowID, pipeline, destination string) error {
 	s.batchMu.Lock()
 	if s.inBatch {
 		s.batchPending = append(s.batchPending, deliveryEntry{
@@ -332,7 +333,7 @@ func (s *SQLiteStore) MarkDelivered(rowID, pipeline, destination string) error {
 	}
 	s.batchMu.Unlock()
 
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO delivery_log (row_id, pipeline, destination) VALUES (?, ?, ?)`, rowID, pipeline, destination)
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO delivery_log (row_id, pipeline, destination) VALUES (?, ?, ?)`, rowID, pipeline, destination)
 	return err
 }
 
@@ -381,10 +382,10 @@ func (s *SQLiteStore) CommitBatch(ctx context.Context) error {
 }
 
 // PruneDelivered deletes delivery-log entries older than the cutoff.
-func (s *SQLiteStore) PruneDelivered(olderThan time.Time) (int64, error) {
+func (s *SQLiteStore) PruneDelivered(ctx context.Context, olderThan time.Time) (int64, error) {
 	// datetime() normalizes both CURRENT_TIMESTAMP and driver-written
 	// time.Time formats before comparison.
-	res, err := s.db.Exec(
+	res, err := s.db.ExecContext(ctx, 
 		`DELETE FROM delivery_log WHERE datetime(delivered_at) < datetime(?)`,
 		olderThan.UTC().Format("2006-01-02 15:04:05"),
 	)

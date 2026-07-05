@@ -24,7 +24,7 @@ func (s *MergeStrategy) Execute(ctx context.Context, rows []row.Row, dest destin
 	ctx = withStrategyName(ctx, s.Name())
 
 	for _, rw := range rows {
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 		if err != nil {
 			result.Errors = append(result.Errors, destination.RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -43,7 +43,7 @@ func (s *MergeStrategy) Execute(ctx context.Context, rows []row.Row, dest destin
 			continue
 		}
 		if loadRes.Loaded > 0 {
-			if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+			if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 				result.Errors = append(result.Errors, destination.RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
 			}

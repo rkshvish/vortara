@@ -109,6 +109,7 @@ func TestPostgresDestination_Connect_MissingMatchOn(t *testing.T) {
 }
 
 func TestPostgresDestination_Load_AlreadyDelivered(t *testing.T) {
+	ctx := context.Background()
 	db, mock := newSQLMockDB(t)
 	dst := NewPostgresDestination()
 	dst.db = db
@@ -116,7 +117,7 @@ func TestPostgresDestination_Load_AlreadyDelivered(t *testing.T) {
 
 	store := state.NewMemoryStore()
 	rw := row.NewRow("source", "pipeline", "id=1", map[string]interface{}{"id": 1, "name": "foo"}, time.Now())
-	if err := store.MarkDelivered(rw.ID, "pipeline", "dest"); err != nil {
+	if err := store.MarkDelivered(ctx, rw.ID, "pipeline", "dest"); err != nil {
 		t.Fatalf("MarkDelivered: %v", err)
 	}
 
@@ -133,6 +134,7 @@ func TestPostgresDestination_Load_AlreadyDelivered(t *testing.T) {
 }
 
 func TestPostgresDestination_Load_Success(t *testing.T) {
+	ctx := context.Background()
 	db, mock := newSQLMockDB(t)
 	dst := NewPostgresDestination()
 	dst.db = db
@@ -153,7 +155,7 @@ func TestPostgresDestination_Load_Success(t *testing.T) {
 	if len(res.Errors) != 0 {
 		t.Fatalf("expected no errors, got %d", len(res.Errors))
 	}
-	delivered, err := store.IsDelivered(rw.ID, "pipeline", "dest")
+	delivered, err := store.IsDelivered(ctx, rw.ID, "pipeline", "dest")
 	if err != nil {
 		t.Fatalf("IsDelivered: %v", err)
 	}

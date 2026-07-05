@@ -45,7 +45,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Dest:      %s\n", name)
 	}
 
-	lastRun, err := store.GetLastRun(cfg.Name)
+	lastRun, err := store.GetLastRun(cmd.Context(), cfg.Name)
 	if err != nil {
 		fmt.Println("Status:    never run")
 		return nil

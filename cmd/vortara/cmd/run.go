@@ -63,11 +63,11 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--full-refresh and --since are mutually exclusive")
 	}
 	if flagFullRefresh {
-		if err := store.SetWatermark(cfg.Name, sourceName(cfg), time.Time{}); err != nil {
+		if err := store.SetWatermark(cmd.Context(), cfg.Name, sourceName(cfg), time.Time{}); err != nil {
 			_ = store.Close()
 			return err
 		}
-		if err := store.SetNumericWatermark(cfg.Name, sourceName(cfg), 0); err != nil {
+		if err := store.SetNumericWatermark(cmd.Context(), cfg.Name, sourceName(cfg), 0); err != nil {
 			_ = store.Close()
 			return err
 		}
@@ -76,7 +76,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	if flagSince != "" {
 		if n, err := strconv.ParseInt(flagSince, 10, 64); err == nil {
 			// Integer value: numeric-cursor backfill (extract ids > n).
-			if err := store.SetNumericWatermark(cfg.Name, sourceName(cfg), n); err != nil {
+			if err := store.SetNumericWatermark(cmd.Context(), cfg.Name, sourceName(cfg), n); err != nil {
 				_ = store.Close()
 				return err
 			}
@@ -87,7 +87,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 				_ = store.Close()
 				return err
 			}
-			if err := store.SetWatermark(cfg.Name, sourceName(cfg), since); err != nil {
+			if err := store.SetWatermark(cmd.Context(), cfg.Name, sourceName(cfg), since); err != nil {
 				_ = store.Close()
 				return err
 			}
@@ -119,7 +119,7 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	lastRun, err := eng.Store().GetLastRun(cfg.Name)
+	lastRun, err := eng.Store().GetLastRun(ctx, cfg.Name)
 	if err == nil {
 		fmt.Printf("✓ Done: loaded=%d skipped=%d errors=%d duration=%s\n",
 			lastRun.RowsLoaded,

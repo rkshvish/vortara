@@ -150,6 +150,7 @@ func TestSalesforceDestination_Load_RESTUpsert(t *testing.T) {
 }
 
 func TestSalesforceDestination_Load_AlreadyDelivered(t *testing.T) {
+	ctx := context.Background()
 	var calls int
 	dst := newSalesforceTestDestination(t, "http://example.com")
 	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
@@ -157,7 +158,7 @@ func TestSalesforceDestination_Load_AlreadyDelivered(t *testing.T) {
 		return nil, fmt.Errorf("unexpected HTTP call: %s %s", r.Method, r.URL.Path)
 	})
 	store := state.NewMemoryStore()
-	if err := store.MarkDelivered("row-1", "pipeline", "dest"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline", "dest"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 	rw := row.Row{ID: "row-1", Data: map[string]interface{}{"ExternalId__c": "ext-1", "Name": "Deal A"}}

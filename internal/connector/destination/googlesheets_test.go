@@ -118,6 +118,7 @@ func TestGoogleSheets_Load_ExplicitColumns(t *testing.T) {
 }
 
 func TestGoogleSheets_Load_APIError(t *testing.T) {
+	ctx := context.Background()
 	fake := &fakeSheets{err: errors.New("quota exceeded")}
 	withFakeSheets(t, fake)
 
@@ -138,7 +139,7 @@ func TestGoogleSheets_Load_APIError(t *testing.T) {
 	if len(result.Errors) != 1 || result.Loaded != 0 {
 		t.Fatalf("result = %+v, want 1 row error", result)
 	}
-	delivered, _ := store.IsDelivered(rows[0].ID, "pipe", "sheets")
+	delivered, _ := store.IsDelivered(ctx, rows[0].ID, "pipe", "sheets")
 	if delivered {
 		t.Fatal("failed row must not be marked delivered")
 	}

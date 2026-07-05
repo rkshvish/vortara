@@ -100,7 +100,7 @@ func (r *RESTAPIDestination) Load(ctx context.Context, rows []row.Row, store sta
 			return result, err
 		}
 
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -150,7 +150,7 @@ func (r *RESTAPIDestination) Load(ctx context.Context, rows []row.Row, store sta
 				return
 			}
 
-			if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+			if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 				mu.Lock()
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				mu.Unlock()

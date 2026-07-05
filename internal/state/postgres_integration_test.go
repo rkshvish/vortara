@@ -50,60 +50,60 @@ func TestPostgresStore_Integration_FullContract(t *testing.T) {
 	}
 
 	// Watermarks: zero when unset, upsert, read back.
-	wm, err := store.GetWatermark("p1", "s1")
+	wm, err := store.GetWatermark(ctx, "p1", "s1")
 	if err != nil || !wm.IsZero() {
 		t.Fatalf("initial watermark = %v, %v; want zero", wm, err)
 	}
 	ts := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	if err := store.SetWatermark("p1", "s1", ts); err != nil {
+	if err := store.SetWatermark(ctx, "p1", "s1", ts); err != nil {
 		t.Fatalf("SetWatermark: %v", err)
 	}
-	if err := store.SetWatermark("p1", "s1", ts.Add(time.Hour)); err != nil {
+	if err := store.SetWatermark(ctx, "p1", "s1", ts.Add(time.Hour)); err != nil {
 		t.Fatalf("SetWatermark upsert: %v", err)
 	}
-	wm, _ = store.GetWatermark("p1", "s1")
+	wm, _ = store.GetWatermark(ctx, "p1", "s1")
 	if !wm.Equal(ts.Add(time.Hour)) {
 		t.Fatalf("watermark = %v, want %v", wm, ts.Add(time.Hour))
 	}
 
 	// Numeric cursor.
-	if n, err := store.GetNumericWatermark("p1", "s1"); err != nil || n != 0 {
+	if n, err := store.GetNumericWatermark(ctx, "p1", "s1"); err != nil || n != 0 {
 		t.Fatalf("initial numeric = %d, %v", n, err)
 	}
-	if err := store.SetNumericWatermark("p1", "s1", 42); err != nil {
+	if err := store.SetNumericWatermark(ctx, "p1", "s1", 42); err != nil {
 		t.Fatalf("SetNumericWatermark: %v", err)
 	}
-	if n, _ := store.GetNumericWatermark("p1", "s1"); n != 42 {
+	if n, _ := store.GetNumericWatermark(ctx, "p1", "s1"); n != 42 {
 		t.Fatalf("numeric = %d, want 42", n)
 	}
 
 	// Kafka offsets: -1 when unset.
-	if off, err := store.GetOffset("p1", "topic", 0); err != nil || off != -1 {
+	if off, err := store.GetOffset(ctx, "p1", "topic", 0); err != nil || off != -1 {
 		t.Fatalf("initial offset = %d, %v; want -1", off, err)
 	}
-	if err := store.SetOffset("p1", "topic", 0, 99); err != nil {
+	if err := store.SetOffset(ctx, "p1", "topic", 0, 99); err != nil {
 		t.Fatalf("SetOffset: %v", err)
 	}
-	if off, _ := store.GetOffset("p1", "topic", 0); off != 99 {
+	if off, _ := store.GetOffset(ctx, "p1", "topic", 0); off != 99 {
 		t.Fatalf("offset = %d, want 99", off)
 	}
 
 	// Run log lifecycle.
-	runID, err := store.StartRun("p1", "batch")
+	runID, err := store.StartRun(ctx, "p1", "batch")
 	if err != nil || runID == 0 {
 		t.Fatalf("StartRun = %d, %v", runID, err)
 	}
-	if err := store.FinishRun(runID, RunStats{RowsLoaded: 7, Status: "success"}); err != nil {
+	if err := store.FinishRun(ctx, runID, RunStats{RowsLoaded: 7, Status: "success"}); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	last, err := store.GetLastRun("p1")
+	last, err := store.GetLastRun(ctx, "p1")
 	if err != nil || last.ID != runID || last.RowsLoaded != 7 || last.Status != "success" {
 		t.Fatalf("GetLastRun = %+v, %v", last, err)
 	}
 	if last.FinishedAt.IsZero() || last.StartedAt.IsZero() {
 		t.Fatalf("run timestamps not set: %+v", last)
 	}
-	hist, err := store.GetRunHistory("p1", 10)
+	hist, err := store.GetRunHistory(ctx, "p1", 10)
 	if err != nil || len(hist) != 1 {
 		t.Fatalf("history = %d entries, %v", len(hist), err)
 	}
@@ -113,29 +113,29 @@ func TestPostgresStore_Integration_FullContract(t *testing.T) {
 		t.Fatalf("BeginBatch: %v", err)
 	}
 	for i := 0; i < 2500; i++ { // multiple commit chunks
-		if err := store.MarkDelivered(fmt.Sprintf("r%d", i), "p1", "d1"); err != nil {
+		if err := store.MarkDelivered(ctx, fmt.Sprintf("r%d", i), "p1", "d1"); err != nil {
 			t.Fatalf("MarkDelivered: %v", err)
 		}
 	}
 	// In-batch visibility.
-	if ok, _ := store.IsDelivered("r1", "p1", "d1"); !ok {
+	if ok, _ := store.IsDelivered(ctx, "r1", "p1", "d1"); !ok {
 		t.Fatal("r1 should be visible inside the batch")
 	}
 	if err := store.CommitBatch(context.Background()); err != nil {
 		t.Fatalf("CommitBatch: %v", err)
 	}
-	if ok, _ := store.IsDelivered("r2499", "p1", "d1"); !ok {
+	if ok, _ := store.IsDelivered(ctx, "r2499", "p1", "d1"); !ok {
 		t.Fatal("r2499 should be delivered after commit")
 	}
-	if ok, _ := store.IsDelivered("nope", "p1", "d1"); ok {
+	if ok, _ := store.IsDelivered(ctx, "nope", "p1", "d1"); ok {
 		t.Fatal("unknown row should not be delivered")
 	}
 
 	// Prune.
-	if n, err := store.PruneDelivered(time.Now().Add(-time.Hour)); err != nil || n != 0 {
+	if n, err := store.PruneDelivered(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {
 		t.Fatalf("prune(past) = %d, %v; want 0", n, err)
 	}
-	if n, err := store.PruneDelivered(time.Now().Add(time.Hour)); err != nil || n != 2500 {
+	if n, err := store.PruneDelivered(ctx, time.Now().Add(time.Hour)); err != nil || n != 2500 {
 		t.Fatalf("prune(future) = %d, %v; want 2500", n, err)
 	}
 
@@ -148,13 +148,13 @@ func TestPostgresStore_Integration_FullContract(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer store2.Close()
-	if wm, _ := store2.GetWatermark("p1", "s1"); !wm.Equal(ts.Add(time.Hour)) {
+	if wm, _ := store2.GetWatermark(ctx, "p1", "s1"); !wm.Equal(ts.Add(time.Hour)) {
 		t.Fatalf("watermark after reopen = %v", wm)
 	}
-	if n, _ := store2.GetNumericWatermark("p1", "s1"); n != 42 {
+	if n, _ := store2.GetNumericWatermark(ctx, "p1", "s1"); n != 42 {
 		t.Fatalf("numeric after reopen = %d", n)
 	}
-	if last, err := store2.GetLastRun("p1"); err != nil || last.RowsLoaded != 7 {
+	if last, err := store2.GetLastRun(ctx, "p1"); err != nil || last.RowsLoaded != 7 {
 		t.Fatalf("run log after reopen = %+v, %v", last, err)
 	}
 }
@@ -168,7 +168,7 @@ func TestPostgresStore_Integration_RegistryAndPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("custom prefix: %v", err)
 	}
-	if err := store.SetWatermark("p", "s", time.Now()); err != nil {
+	if err := store.SetWatermark(ctx, "p", "s", time.Now()); err != nil {
 		t.Fatalf("write with custom prefix: %v", err)
 	}
 	_ = store.Close()

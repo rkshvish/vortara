@@ -100,7 +100,7 @@ func (s *SlackDestination) Load(ctx context.Context, rows []row.Row, store state
 			return result, err
 		}
 
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -121,7 +121,7 @@ func (s *SlackDestination) Load(ctx context.Context, rows []row.Row, store state
 			continue
 		}
 
-		if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}

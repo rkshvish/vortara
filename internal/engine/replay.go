@@ -107,13 +107,13 @@ func (e *Engine) ReplayDLQ(ctx context.Context, cfg *v2cfg.PipelineConfig, path 
 	}
 	defer closeDestinations(dests)
 
-	runID, err := e.store.StartRun(cfg.Name, "replay")
+	runID, err := e.store.StartRun(ctx, cfg.Name, "replay")
 	if err != nil {
 		return result, err
 	}
 	stats := state.RunStats{Status: "success"}
 	defer func() {
-		_ = e.store.FinishRun(runID, stats)
+		_ = e.store.FinishRun(ctx, runID, stats)
 	}()
 	if err := e.store.BeginBatch(ctx); err != nil {
 		stats.Status = "failed"

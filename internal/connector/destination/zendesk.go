@@ -106,7 +106,7 @@ func (z *ZendeskDestination) Load(ctx context.Context, rows []row.Row, store sta
 
 	pending := make([]row.Row, 0, len(rows))
 	for _, rw := range rows {
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -153,7 +153,7 @@ func (z *ZendeskDestination) Load(ctx context.Context, rows []row.Row, store sta
 				mu.Unlock()
 				return
 			}
-			if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+			if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 				mu.Lock()
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				mu.Unlock()

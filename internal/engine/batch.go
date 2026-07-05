@@ -78,13 +78,13 @@ func (e *Engine) runBatchOnce(ctx context.Context, cfg *v2cfg.PipelineConfig, sr
 		ctx, cancelRuntime = context.WithTimeout(ctx, d)
 		defer cancelRuntime()
 	}
-	runID, err := e.store.StartRun(cfg.Name, "batch")
+	runID, err := e.store.StartRun(ctx, cfg.Name, "batch")
 	if err != nil {
 		return err
 	}
 	stats := state.RunStats{Status: "success"}
 	defer func() {
-		_ = e.store.FinishRun(runID, stats)
+		_ = e.store.FinishRun(ctx, runID, stats)
 	}()
 
 	if err := e.store.BeginBatch(ctx); err != nil {
@@ -126,7 +126,7 @@ func (e *Engine) runBatchOnce(ctx context.Context, cfg *v2cfg.PipelineConfig, sr
 
 	extractDone := make(chan struct{})
 	if cursorKind == "int" {
-		startCursor, curErr := e.store.GetNumericWatermark(cfg.Name, srcName)
+		startCursor, curErr := e.store.GetNumericWatermark(ctx, cfg.Name, srcName)
 		if curErr != nil {
 			stats.Status = "failed"
 			stats.Error = curErr.Error()
@@ -316,14 +316,14 @@ func (e *Engine) runBatchOnce(ctx context.Context, cfg *v2cfg.PipelineConfig, sr
 		// finishes cleanly, so the next run resumes from the last emitted id;
 		// a cancelled run re-extracts and the delivery log dedupes).
 		if extractErr == nil && firstErr == nil && !cancelled {
-			_ = e.store.SetNumericWatermark(cfg.Name, srcName, maxCursor)
+			_ = e.store.SetNumericWatermark(ctx, cfg.Name, srcName, maxCursor)
 		}
 	case cancelled:
 		if !highWatermark.IsZero() {
-			_ = e.store.SetWatermark(cfg.Name, srcName, highWatermark)
+			_ = e.store.SetWatermark(ctx, cfg.Name, srcName, highWatermark)
 		}
 	case extractErr == nil && firstErr == nil:
-		_ = e.store.SetWatermark(cfg.Name, srcName, newWatermark)
+		_ = e.store.SetWatermark(ctx, cfg.Name, srcName, newWatermark)
 	}
 
 	if extractErr != nil && !errors.Is(extractErr, context.Canceled) && !errors.Is(extractErr, context.DeadlineExceeded) && !errors.Is(extractErr, errMaxRowsReached) {
@@ -352,7 +352,7 @@ func (e *Engine) runBatchOnce(ctx context.Context, cfg *v2cfg.PipelineConfig, sr
 	// After a fully successful run, prune delivery-log entries older than
 	// settings.state.delivered_ttl so state does not grow without bound.
 	if ttl, err := time.ParseDuration(strings.TrimSpace(cfg.Settings.State.DeliveredTTL)); err == nil && ttl > 0 && !cancelled {
-		if n, err := e.store.PruneDelivered(time.Now().Add(-ttl)); err != nil {
+		if n, err := e.store.PruneDelivered(ctx, time.Now().Add(-ttl)); err != nil {
 			l.Warn("delivery-log prune failed",
 				slog.String("pipeline", cfg.Name),
 				slog.String("error", err.Error()),

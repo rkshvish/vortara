@@ -119,7 +119,7 @@ func (g *GoogleSheetsDestination) Load(ctx context.Context, rows []row.Row, stor
 
 	pending := make([]row.Row, 0, len(rows))
 	for _, rw := range rows {
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -155,7 +155,7 @@ func (g *GoogleSheetsDestination) Load(ctx context.Context, rows []row.Row, stor
 	}
 
 	for _, rw := range pending {
-		if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}

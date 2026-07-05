@@ -212,7 +212,7 @@ func (p *PostgresDestination) scd2Batch(ctx context.Context, rows []row.Row, sto
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 		if err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
@@ -263,7 +263,7 @@ func (p *PostgresDestination) scd2Batch(ctx context.Context, rows []row.Row, sto
 			continue
 		}
 
-		if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}
@@ -412,7 +412,7 @@ func (p *PostgresDestination) insertBatch(ctx context.Context, rows []row.Row, s
 			return result, err
 		}
 		if !skipDeliveryCheck {
-			delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+			delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 			if err != nil {
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
@@ -469,7 +469,7 @@ func (p *PostgresDestination) writeSingleRow(ctx context.Context, rw row.Row, st
 		result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 		return nil
 	}
-	if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+	if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 		result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 		return nil
 	}
@@ -552,7 +552,7 @@ func (p *PostgresDestination) chunkedWrite(ctx context.Context, pending []row.Ro
 				return nil
 			}
 			for _, rw := range batch {
-				if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+				if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 					result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 					continue
 				}

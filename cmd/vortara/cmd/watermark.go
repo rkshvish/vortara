@@ -49,11 +49,11 @@ func runWatermarkGet(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 
 	srcName := sourceName(cfg)
-	if num, err := store.GetNumericWatermark(cfg.Name, srcName); err == nil && num != 0 {
+	if num, err := store.GetNumericWatermark(cmd.Context(), cfg.Name, srcName); err == nil && num != 0 {
 		fmt.Printf("Watermark: %d (numeric cursor)\n", num)
 		return nil
 	}
-	wm, err := store.GetWatermark(cfg.Name, srcName)
+	wm, err := store.GetWatermark(cmd.Context(), cfg.Name, srcName)
 	if err != nil {
 		return err
 	}
@@ -80,10 +80,10 @@ func runWatermarkReset(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	if err := store.SetWatermark(cfg.Name, sourceName(cfg), time.Time{}); err != nil {
+	if err := store.SetWatermark(cmd.Context(), cfg.Name, sourceName(cfg), time.Time{}); err != nil {
 		return err
 	}
-	if err := store.SetNumericWatermark(cfg.Name, sourceName(cfg), 0); err != nil {
+	if err := store.SetNumericWatermark(cmd.Context(), cfg.Name, sourceName(cfg), 0); err != nil {
 		return err
 	}
 	fmt.Println("Watermark reset. Next run will perform full sync.")

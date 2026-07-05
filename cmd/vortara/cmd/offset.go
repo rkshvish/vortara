@@ -53,7 +53,7 @@ func runOffsetGet(cmd *cobra.Command, args []string) error {
 
 	found := false
 	for partition := 0; partition < 10; partition++ {
-		offset, err := store.GetOffset(cfg.Name, topic, partition)
+		offset, err := store.GetOffset(cmd.Context(), cfg.Name, topic, partition)
 		if err != nil {
 			return err
 		}
@@ -86,14 +86,14 @@ func runOffsetReset(cmd *cobra.Command, args []string) error {
 
 	topic := cfg.Source.Topic
 	for partition := 0; partition < 10; partition++ {
-		offset, err := store.GetOffset(cfg.Name, topic, partition)
+		offset, err := store.GetOffset(cmd.Context(), cfg.Name, topic, partition)
 		if err != nil {
 			return err
 		}
 		if offset == -1 {
 			break
 		}
-		if err := store.SetOffset(cfg.Name, topic, partition, 0); err != nil {
+		if err := store.SetOffset(cmd.Context(), cfg.Name, topic, partition, 0); err != nil {
 			return err
 		}
 	}

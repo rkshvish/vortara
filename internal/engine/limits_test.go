@@ -20,6 +20,7 @@ import (
 // a run capped by max_rows saves the watermark of delivered rows, and the
 // next run resumes from there instead of re-extracting.
 func TestLimits_MaxRowsResumesFromState(t *testing.T) {
+	ctx := context.Background()
 	registerV2Mocks()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	allRows := make([]row.Row, 5)
@@ -60,7 +61,7 @@ func TestLimits_MaxRowsResumesFromState(t *testing.T) {
 	if got := len(dest1.rows); got != 3 {
 		t.Fatalf("run 1 delivered %d rows, want 3 (max_rows cap)", got)
 	}
-	wm, err := store.GetWatermark(cfg.Name, "src1")
+	wm, err := store.GetWatermark(ctx, cfg.Name, "src1")
 	if err != nil || wm.IsZero() {
 		t.Fatalf("watermark after capped run = %v err %v, want the last delivered row's watermark", wm, err)
 	}
@@ -89,6 +90,7 @@ func TestLimits_MaxRowsResumesFromState(t *testing.T) {
 // TestSnapshot_NoWatermarkSaved verifies watermark: none never advances the
 // cursor: every run is a full extract and the stored watermark stays zero.
 func TestSnapshot_NoWatermarkSaved(t *testing.T) {
+	ctx := context.Background()
 	registerV2Mocks()
 	rows := []row.Row{
 		row.NewRow("src", "snap-test", "pk1", map[string]interface{}{"n": 1}, time.Time{}),
@@ -124,7 +126,7 @@ func TestSnapshot_NoWatermarkSaved(t *testing.T) {
 			t.Fatalf("run %d delivered %d rows, want full snapshot of 2", run, got)
 		}
 	}
-	wm, err := store.GetWatermark(cfg.Name, "src1")
+	wm, err := store.GetWatermark(ctx, cfg.Name, "src1")
 	if err != nil || !wm.IsZero() {
 		t.Fatalf("watermark after snapshot runs = %v err %v, want zero (never saved)", wm, err)
 	}
@@ -170,6 +172,7 @@ func (m *mockNumericSource) ExtractNumeric(ctx context.Context, cursor, limit in
 // integer-cursor sources through ExtractNumeric, persists the cursor, and
 // resumes: capped run delivers the first chunk, next run the remainder.
 func TestNumericCursor_EnginePersistsAndResumes(t *testing.T) {
+	ctx := context.Background()
 	registerV2Mocks()
 	src := &mockNumericSource{}
 	for i := int64(1); i <= 5; i++ {
@@ -200,7 +203,7 @@ func TestNumericCursor_EnginePersistsAndResumes(t *testing.T) {
 	if got := len(dest1.rows); got != 3 {
 		t.Fatalf("run 1 delivered %d, want 3", got)
 	}
-	cur, err := store.GetNumericWatermark(cfg.Name, "numsrc")
+	cur, err := store.GetNumericWatermark(ctx, cfg.Name, "numsrc")
 	if err != nil || cur != 3 {
 		t.Fatalf("cursor after run 1 = %d err %v, want 3", cur, err)
 	}
@@ -213,12 +216,12 @@ func TestNumericCursor_EnginePersistsAndResumes(t *testing.T) {
 	if got := len(dest2.rows); got != 2 {
 		t.Fatalf("run 2 delivered %d, want 2", got)
 	}
-	cur, _ = store.GetNumericWatermark(cfg.Name, "numsrc")
+	cur, _ = store.GetNumericWatermark(ctx, cfg.Name, "numsrc")
 	if cur != 5 {
 		t.Fatalf("cursor after run 2 = %d, want 5", cur)
 	}
 	// The time watermark must remain untouched.
-	wm, _ := store.GetWatermark(cfg.Name, "numsrc")
+	wm, _ := store.GetWatermark(ctx, cfg.Name, "numsrc")
 	if !wm.IsZero() {
 		t.Fatalf("time watermark = %v, want zero for numeric pipelines", wm)
 	}

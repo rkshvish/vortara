@@ -145,7 +145,7 @@ func (s *SnowflakeDestination) Load(ctx context.Context, rows []row.Row, store s
 			return result, err
 		}
 		if !skipDeliveryCheck {
-			delivered, err := store.IsDelivered(rw.ID, pipeline, destination)
+			delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destination)
 			if err != nil {
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
@@ -162,7 +162,7 @@ func (s *SnowflakeDestination) Load(ctx context.Context, rows []row.Row, store s
 		}
 
 		if !skipDeliveryCheck {
-			if err := store.MarkDelivered(rw.ID, pipeline, destination); err != nil {
+			if err := store.MarkDelivered(ctx, rw.ID, pipeline, destination); err != nil {
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
 			}

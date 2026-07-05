@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,6 +55,7 @@ func TestBuild_UnknownBackend(t *testing.T) {
 }
 
 func TestBuild_DefaultBackend(t *testing.T) {
+	ctx := context.Background()
 	resetRegistryForTest()
 	t.Cleanup(resetRegistryForTest)
 	registerBuiltinsForTest()
@@ -65,10 +67,10 @@ func TestBuild_DefaultBackend(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SetWatermark("pipe", "src", time.Unix(789, 0).UTC()); err != nil {
+	if err := store.SetWatermark(ctx, "pipe", "src", time.Unix(789, 0).UTC()); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
-	got, err := store.GetWatermark("pipe", "src")
+	got, err := store.GetWatermark(ctx, "pipe", "src")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -78,6 +80,7 @@ func TestBuild_DefaultBackend(t *testing.T) {
 }
 
 func TestBuild_SQLite(t *testing.T) {
+	ctx := context.Background()
 	resetRegistryForTest()
 	t.Cleanup(resetRegistryForTest)
 	registerBuiltinsForTest()
@@ -89,10 +92,10 @@ func TestBuild_SQLite(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SetWatermark("pipe", "src", time.Unix(123, 0).UTC()); err != nil {
+	if err := store.SetWatermark(ctx, "pipe", "src", time.Unix(123, 0).UTC()); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
-	got, err := store.GetWatermark("pipe", "src")
+	got, err := store.GetWatermark(ctx, "pipe", "src")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -102,6 +105,7 @@ func TestBuild_SQLite(t *testing.T) {
 }
 
 func TestBuild_Memory(t *testing.T) {
+	ctx := context.Background()
 	resetRegistryForTest()
 	t.Cleanup(resetRegistryForTest)
 	registerBuiltinsForTest()
@@ -113,10 +117,10 @@ func TestBuild_Memory(t *testing.T) {
 	defer store.Close()
 
 	want := time.Unix(456, 0).UTC()
-	if err := store.SetWatermark("pipe", "src", want); err != nil {
+	if err := store.SetWatermark(ctx, "pipe", "src", want); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
-	got, err := store.GetWatermark("pipe", "src")
+	got, err := store.GetWatermark(ctx, "pipe", "src")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}

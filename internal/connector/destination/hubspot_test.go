@@ -120,6 +120,7 @@ func TestHubSpotDestination_Load_Success(t *testing.T) {
 }
 
 func TestHubSpotDestination_Load_AlreadyDelivered(t *testing.T) {
+	ctx := context.Background()
 	var body struct {
 		Inputs []struct {
 			ID string `json:"id"`
@@ -140,7 +141,7 @@ func TestHubSpotDestination_Load_AlreadyDelivered(t *testing.T) {
 
 	store := state.NewMemoryStore()
 	rows := hubspotRows(3)
-	if err := store.MarkDelivered(rows[1].ID, "pipeline", "hubspot"); err != nil {
+	if err := store.MarkDelivered(ctx, rows[1].ID, "pipeline", "hubspot"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 

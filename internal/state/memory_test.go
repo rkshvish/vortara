@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -8,9 +9,10 @@ import (
 
 // TestMemoryStore_Watermark verifies watermark reads and writes.
 func TestMemoryStore_Watermark(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
-	wm, err := store.GetWatermark("pipeline-a", "source-a")
+	wm, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -19,11 +21,11 @@ func TestMemoryStore_Watermark(t *testing.T) {
 	}
 
 	first := time.Now().UTC().Truncate(time.Second)
-	if err := store.SetWatermark("pipeline-a", "source-a", first); err != nil {
+	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", first); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
 
-	got, err := store.GetWatermark("pipeline-a", "source-a")
+	got, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -32,11 +34,11 @@ func TestMemoryStore_Watermark(t *testing.T) {
 	}
 
 	second := first.Add(2 * time.Minute)
-	if err := store.SetWatermark("pipeline-a", "source-a", second); err != nil {
+	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", second); err != nil {
 		t.Fatalf("SetWatermark() error = %v", err)
 	}
 
-	got, err = store.GetWatermark("pipeline-a", "source-a")
+	got, err = store.GetWatermark(ctx, "pipeline-a", "source-a")
 	if err != nil {
 		t.Fatalf("GetWatermark() error = %v", err)
 	}
@@ -47,9 +49,10 @@ func TestMemoryStore_Watermark(t *testing.T) {
 
 // TestMemoryStore_KafkaOffset verifies offset reads and writes.
 func TestMemoryStore_KafkaOffset(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
-	offset, err := store.GetOffset("pipeline-a", "topic-a", 0)
+	offset, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -57,11 +60,11 @@ func TestMemoryStore_KafkaOffset(t *testing.T) {
 		t.Fatalf("expected -1 offset, got %d", offset)
 	}
 
-	if err := store.SetOffset("pipeline-a", "topic-a", 0, 42); err != nil {
+	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 42); err != nil {
 		t.Fatalf("SetOffset() error = %v", err)
 	}
 
-	got, err := store.GetOffset("pipeline-a", "topic-a", 0)
+	got, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -69,11 +72,11 @@ func TestMemoryStore_KafkaOffset(t *testing.T) {
 		t.Fatalf("expected 42, got %d", got)
 	}
 
-	if err := store.SetOffset("pipeline-a", "topic-a", 0, 99); err != nil {
+	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 99); err != nil {
 		t.Fatalf("SetOffset() error = %v", err)
 	}
 
-	got, err = store.GetOffset("pipeline-a", "topic-a", 0)
+	got, err = store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
 	if err != nil {
 		t.Fatalf("GetOffset() error = %v", err)
 	}
@@ -84,13 +87,14 @@ func TestMemoryStore_KafkaOffset(t *testing.T) {
 
 // TestMemoryStore_RunLog verifies run creation, update, and lookup.
 func TestMemoryStore_RunLog(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
-	if _, err := store.GetLastRun("pipeline-a"); err == nil {
+	if _, err := store.GetLastRun(ctx, "pipeline-a"); err == nil {
 		t.Fatal("expected error for empty run log")
 	}
 
-	runID, err := store.StartRun("pipeline-a", "batch")
+	runID, err := store.StartRun(ctx, "pipeline-a", "batch")
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
@@ -106,11 +110,11 @@ func TestMemoryStore_RunLog(t *testing.T) {
 		Status:        "failed",
 		Error:         "boom",
 	}
-	if err := store.FinishRun(runID, stats); err != nil {
+	if err := store.FinishRun(ctx, runID, stats); err != nil {
 		t.Fatalf("FinishRun() error = %v", err)
 	}
 
-	secondRunID, err := store.StartRun("pipeline-a", "batch")
+	secondRunID, err := store.StartRun(ctx, "pipeline-a", "batch")
 	if err != nil {
 		t.Fatalf("StartRun() second error = %v", err)
 	}
@@ -118,7 +122,7 @@ func TestMemoryStore_RunLog(t *testing.T) {
 		t.Fatalf("expected later run ID, got %d after %d", secondRunID, runID)
 	}
 
-	got, err := store.GetLastRun("pipeline-a")
+	got, err := store.GetLastRun(ctx, "pipeline-a")
 	if err != nil {
 		t.Fatalf("GetLastRun() error = %v", err)
 	}
@@ -129,9 +133,10 @@ func TestMemoryStore_RunLog(t *testing.T) {
 
 // TestMemoryStore_Delivery verifies delivery idempotency tracking.
 func TestMemoryStore_Delivery(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
-	ok, err := store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -139,14 +144,14 @@ func TestMemoryStore_Delivery(t *testing.T) {
 		t.Fatal("expected row to be undelivered")
 	}
 
-	if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	if err := store.MarkDelivered("row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
 		t.Fatalf("MarkDelivered() second call error = %v", err)
 	}
 
-	ok, err = store.IsDelivered("row-1", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -157,6 +162,7 @@ func TestMemoryStore_Delivery(t *testing.T) {
 
 // TestMemoryStore_Concurrent verifies concurrent writes do not race or error.
 func TestMemoryStore_Concurrent(t *testing.T) {
+	ctx := context.Background()
 	store := NewMemoryStore()
 
 	var wg sync.WaitGroup
@@ -166,7 +172,7 @@ func TestMemoryStore_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- store.SetWatermark("pipeline-a", "source-"+string(rune('a'+i)), time.Unix(int64(i), 0).UTC())
+			errs <- store.SetWatermark(ctx, "pipeline-a", "source-"+string(rune('a'+i)), time.Unix(int64(i), 0).UTC())
 		}()
 	}
 	wg.Wait()

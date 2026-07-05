@@ -222,6 +222,7 @@ func TestRESTAPIDestination_AuthAPIKey(t *testing.T) {
 
 // TestRESTAPIDestination_Load_AlreadyDelivered verifies delivered rows are skipped.
 func TestRESTAPIDestination_Load_AlreadyDelivered(t *testing.T) {
+	ctx := context.Background()
 	var calls int32
 	dst := NewRESTAPIDestination()
 	if err := dst.Connect(context.Background(), config.DestinationConfig{URL: "http://example.com"}); err != nil {
@@ -232,7 +233,7 @@ func TestRESTAPIDestination_Load_AlreadyDelivered(t *testing.T) {
 		return newResponse(http.StatusOK, ""), nil
 	})
 	store := state.NewMemoryStore()
-	if err := store.MarkDelivered("row-1", "pipe", "dest"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "pipe", "dest"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 
@@ -358,6 +359,7 @@ func TestRESTAPIDestination_Load_MultipleRows(t *testing.T) {
 
 // TestRESTAPIDestination_Load_CtxCancel verifies cancellation is returned as a top-level error.
 func TestRESTAPIDestination_Load_CtxCancel(t *testing.T) {
+	ctx := context.Background()
 	dst := NewRESTAPIDestination()
 	if err := dst.Connect(context.Background(), config.DestinationConfig{URL: "http://example.com"}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
@@ -418,6 +420,7 @@ func TestRESTAPIDestination_Headers(t *testing.T) {
 
 // TestRESTAPIDestination_Load_Retry_then_MarkDelivered ensures delivery is recorded after success.
 func TestRESTAPIDestination_Load_Retry_then_MarkDelivered(t *testing.T) {
+	ctx := context.Background()
 	var calls int32
 	dst := NewRESTAPIDestination()
 	if err := dst.Connect(context.Background(), config.DestinationConfig{URL: "http://example.com"}); err != nil {
@@ -439,7 +442,7 @@ func TestRESTAPIDestination_Load_Retry_then_MarkDelivered(t *testing.T) {
 	if result.Loaded != 1 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	ok, err := store.IsDelivered("row-1", "pipe", "dest")
+	ok, err := store.IsDelivered(ctx, "row-1", "pipe", "dest")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}

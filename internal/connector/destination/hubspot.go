@@ -130,7 +130,7 @@ func (h *HubSpotDestination) Load(ctx context.Context, rows []row.Row, store sta
 	for _, batch := range batches {
 		pending := make([]row.Row, 0, len(batch))
 		for _, rw := range batch {
-			delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+			delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 			if err != nil {
 				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 				continue
@@ -192,7 +192,7 @@ func (h *HubSpotDestination) loadBatchesParallel(ctx context.Context, batches []
 			var skipped int
 			var batchErrors []RowError
 			for _, rw := range batch {
-				delivered, err := store.IsDelivered(rw.ID, pipeline, destName)
+				delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 				if err != nil {
 					batchErrors = append(batchErrors, RowError{RowID: rw.ID, Row: rw, Err: err})
 					continue
@@ -243,7 +243,7 @@ func (h *HubSpotDestination) loadBatchesParallel(ctx context.Context, batches []
 						continue
 					}
 				}
-				if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+				if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 					result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 					continue
 				}
@@ -281,7 +281,7 @@ func (h *HubSpotDestination) processPendingBatch(ctx context.Context, pending []
 				continue
 			}
 		}
-		if err := store.MarkDelivered(rw.ID, pipeline, destName); err != nil {
+		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}
