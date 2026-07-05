@@ -1,7 +1,7 @@
 package config
 
 // SourceConfig is the connector-level source configuration used by batch sources.
-// Populated by v2.ToSourceConfig — never unmarshaled from YAML directly.
+// Populated by pipeline.ToSourceConfig — never unmarshaled from YAML directly.
 type SourceConfig struct {
 	Type               string
 	Connection         string // v2: source.url
@@ -17,7 +17,7 @@ type SourceConfig struct {
 }
 
 // StreamingConfig is the connector-level streaming configuration.
-// Populated by v2.ToStreamingConfig — never unmarshaled from YAML directly.
+// Populated by pipeline.ToStreamingConfig — never unmarshaled from YAML directly.
 type StreamingConfig struct {
 	Type     string
 	Broker   string
@@ -32,7 +32,7 @@ type StreamingConfig struct {
 }
 
 // DestinationConfig is the connector-level destination configuration.
-// Populated by v2.ToDestinationConfig — never unmarshaled from YAML directly.
+// Populated by pipeline.ToDestinationConfig — never unmarshaled from YAML directly.
 type DestinationConfig struct {
 	Type             string
 	Connection       string // v2: destination.url (alias for DB destinations)
@@ -66,7 +66,7 @@ type AuthConfig struct {
 }
 
 // InHeaderSpecified reports whether InHeader was explicitly provided.
-// Always false for configs created via v2.ToDestinationConfig; used by
+// Always false for configs created via pipeline.ToDestinationConfig; used by
 // internal/connector/http/auth.go to fall back to type-based defaults.
 func (a AuthConfig) InHeaderSpecified() bool { return a.inHeaderSet }
 

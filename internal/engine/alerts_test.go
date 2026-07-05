@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 func TestSendFailureAlert(t *testing.T) {
@@ -27,9 +27,9 @@ func TestSendFailureAlert(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:   "alert-test",
-		Alerts: &v2.AlertsConfig{OnFailure: &v2.AlertTarget{WebhookURL: srv.URL}},
+		Alerts: &pipeline.AlertsConfig{OnFailure: &pipeline.AlertTarget{WebhookURL: srv.URL}},
 	}
 	sendFailureAlert(context.Background(), cfg, errors.New("boom"))
 
@@ -46,10 +46,10 @@ func TestSendFailureAlert(t *testing.T) {
 
 func TestSendFailureAlert_NoConfig(t *testing.T) {
 	// Must not panic and must not send anything when alerts are absent.
-	sendFailureAlert(context.Background(), &v2.PipelineConfig{Name: "x"}, errors.New("boom"))
+	sendFailureAlert(context.Background(), &pipeline.PipelineConfig{Name: "x"}, errors.New("boom"))
 	sendFailureAlert(context.Background(), nil, errors.New("boom"))
-	sendFailureAlert(context.Background(), &v2.PipelineConfig{
+	sendFailureAlert(context.Background(), &pipeline.PipelineConfig{
 		Name:   "x",
-		Alerts: &v2.AlertsConfig{OnFailure: &v2.AlertTarget{WebhookURL: "http://127.0.0.1:1"}},
+		Alerts: &pipeline.AlertsConfig{OnFailure: &pipeline.AlertTarget{WebhookURL: "http://127.0.0.1:1"}},
 	}, nil)
 }

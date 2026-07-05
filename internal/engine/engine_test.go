@@ -13,7 +13,7 @@ import (
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -147,19 +147,19 @@ func TestRouter_V2_FanOut(t *testing.T) {
 		},
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "v2-fanout",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:      "v2test-batch",
 			Table:     "deals",
 			Watermark: "updated_at",
 			BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{
+		Destinations: []pipeline.DestinationConfig{
 			{Type: "v2test-dest"},
 			{Type: "v2test-dest", When: "status == 'won'"},
 		},
-		Settings: v2.SettingsConfig{Concurrency: v2.ConcurrencySettings{Workers: 2, BatchSize: 10}},
+		Settings: pipeline.SettingsConfig{Concurrency: pipeline.ConcurrencySettings{Workers: 2, BatchSize: 10}},
 	}
 
 	eng := NewEngine(state.NewMemoryStore())
@@ -195,16 +195,16 @@ func TestEngine_RunV2_BatchOnly(t *testing.T) {
 		},
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "batch-only",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:      "v2test-batch",
 			Table:     "deals",
 			Watermark: "updated_at",
 			BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{Concurrency: v2.ConcurrencySettings{Workers: 2, BatchSize: 10}},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{Concurrency: pipeline.ConcurrencySettings{Workers: 2, BatchSize: 10}},
 	}
 
 	eng := NewEngine(state.NewMemoryStore())
@@ -235,15 +235,15 @@ func TestEngine_RunV2_StreamingOnly(t *testing.T) {
 		},
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "stream-only",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:    "v2test-stream",
 			Topic:   "events",
 			GroupID: "group",
 		},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 1}},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 1}},
 	}
 
 	eng := NewEngine(state.NewMemoryStore())
@@ -287,17 +287,17 @@ func TestEngine_RunV2_BatchAndStreaming(t *testing.T) {
 		},
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "both",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:      "v2test-batch",
 			Table:     "deals",
 			Watermark: "updated_at",
 			BatchSize: 10,
 		},
-		Also:         &v2.AlsoConfig{Type: "v2test-stream", Topic: "events", GroupID: "group"},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 1}},
+		Also:         &pipeline.AlsoConfig{Type: "v2test-stream", Topic: "events", GroupID: "group"},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 1}},
 	}
 
 	eng := NewEngine(state.NewMemoryStore())

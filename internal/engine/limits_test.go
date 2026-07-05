@@ -12,7 +12,7 @@ import (
 	"github.com/rkshvish/vortara/internal/router"
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -28,15 +28,15 @@ func TestLimits_MaxRowsResumesFromState(t *testing.T) {
 			map[string]interface{}{"n": i}, base.Add(time.Duration(i)*time.Hour))
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "limit-test",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type: "v2test-batch", Table: "t", Watermark: "updated_at", BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings: v2.SettingsConfig{
-			Limits:      v2.LimitsSettings{MaxRows: 3},
-			Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 10},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings: pipeline.SettingsConfig{
+			Limits:      pipeline.LimitsSettings{MaxRows: 3},
+			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10},
 		},
 	}
 
@@ -94,13 +94,13 @@ func TestSnapshot_NoWatermarkSaved(t *testing.T) {
 		row.NewRow("src", "snap-test", "pk1", map[string]interface{}{"n": 1}, time.Time{}),
 		row.NewRow("src", "snap-test", "pk2", map[string]interface{}{"n": 2}, time.Time{}),
 	}
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "snap-test",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type: "v2test-batch", Table: "countries", Watermark: "none", BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 10}},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10}},
 	}
 
 	store := state.NewMemoryStore()
@@ -178,13 +178,13 @@ func TestNumericCursor_EnginePersistsAndResumes(t *testing.T) {
 			Data: map[string]interface{}{"id": i, "name": fmt.Sprintf("n%d", i)},
 		})
 	}
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:         "numcur-test",
-		Source:       v2.SourceConfig{Type: "v2test-batch", Table: "t", Watermark: "id", BatchSize: 10},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings: v2.SettingsConfig{
-			Limits:      v2.LimitsSettings{MaxRows: 3},
-			Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 10},
+		Source:       pipeline.SourceConfig{Type: "v2test-batch", Table: "t", Watermark: "id", BatchSize: 10},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings: pipeline.SettingsConfig{
+			Limits:      pipeline.LimitsSettings{MaxRows: 3},
+			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10},
 		},
 	}
 	store := state.NewMemoryStore()

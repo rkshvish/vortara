@@ -27,7 +27,7 @@ import (
 
 const salesforceAPIVersion = "v58.0"
 
-// SalesforceDestination writes rows to Salesforce using REST upsert or Bulk API v2.
+// SalesforceDestination writes rows to Salesforce using REST upsert or Bulk API pipeline.
 type SalesforceDestination struct {
 	cfg              config.DestinationConfig
 	auth             httpauth.Authenticator
@@ -97,7 +97,7 @@ func (s *SalesforceDestination) Connect(ctx context.Context, cfg config.Destinat
 	return nil
 }
 
-// Load writes rows to Salesforce using REST upsert or Bulk API v2.
+// Load writes rows to Salesforce using REST upsert or Bulk API pipeline.
 func (s *SalesforceDestination) Load(ctx context.Context, rows []row.Row, store state.StateStore, pipeline, destName string) (LoadResult, error) {
 	var result LoadResult
 	if err := ctx.Err(); err != nil {

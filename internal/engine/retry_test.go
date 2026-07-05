@@ -15,7 +15,7 @@ import (
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -43,10 +43,10 @@ func (f *flakyDestination) Load(ctx context.Context, rows []row.Row, store state
 func (f *flakyDestination) Close() error { return nil }
 
 func TestDispatchWithPolicy_RetrySucceeds(t *testing.T) {
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:         "retry-test",
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{OnError: "retry"},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{OnError: "retry"},
 	}
 	rt, err := router.New(cfg.Destinations)
 	if err != nil {
@@ -66,10 +66,10 @@ func TestDispatchWithPolicy_RetrySucceeds(t *testing.T) {
 }
 
 func TestDispatchWithPolicy_RetryExhausted(t *testing.T) {
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:         "retry-test",
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{OnError: "retry"},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{OnError: "retry"},
 	}
 	rt, err := router.New(cfg.Destinations)
 	if err != nil {
@@ -89,10 +89,10 @@ func TestDispatchWithPolicy_RetryExhausted(t *testing.T) {
 }
 
 func TestDispatchWithPolicy_SkipModeNoRetry(t *testing.T) {
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:         "skip-test",
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings:     v2.SettingsConfig{OnError: "skip"},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings:     pipeline.SettingsConfig{OnError: "skip"},
 	}
 	rt, err := router.New(cfg.Destinations)
 	if err != nil {
@@ -119,14 +119,14 @@ func TestStreamingDLQ_AcksFailedRows(t *testing.T) {
 			row.NewRow("src", "pipe", "pk1", map[string]interface{}{"x": 1}, time.Now()),
 		},
 	}
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name:         "stream-dlq",
-		Source:       v2.SourceConfig{Type: "v2test-stream", Topic: "events", GroupID: "g"},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings: v2.SettingsConfig{
+		Source:       pipeline.SourceConfig{Type: "v2test-stream", Topic: "events", GroupID: "g"},
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings: pipeline.SettingsConfig{
 			OnError:     "dlq",
 			DLQPath:     dlqPath,
-			Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 1},
+			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 1},
 		},
 	}
 	rt, err := router.New(cfg.Destinations)

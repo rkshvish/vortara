@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rkshvish/vortara/internal/steps"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -20,7 +20,7 @@ type Router struct {
 }
 
 // New compiles destination when: expressions.
-func New(dests []v2.DestinationConfig) (*Router, error) {
+func New(dests []pipeline.DestinationConfig) (*Router, error) {
 	routes := make([]Route, len(dests))
 	for i, d := range dests {
 		routes[i].Index = i

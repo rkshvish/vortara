@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -19,8 +19,8 @@ type Processor struct {
 // stepFn processes one row. Returns modified row and whether it should be kept.
 type stepFn func(r row.Row) (row.Row, bool)
 
-// New builds a Processor from v2 transform step config.
-func New(steps []v2.TransformStep) (*Processor, error) {
+// New builds a Processor from pipeline transform step config.
+func New(steps []pipeline.TransformStep) (*Processor, error) {
 	fns := make([]stepFn, 0, len(steps))
 	mutates := false
 

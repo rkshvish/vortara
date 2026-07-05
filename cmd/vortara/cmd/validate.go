@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 var validateCmd = &cobra.Command{

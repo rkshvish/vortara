@@ -18,7 +18,7 @@ import (
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
 	"github.com/rkshvish/vortara/internal/strategy"
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 

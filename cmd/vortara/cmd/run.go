@@ -17,7 +17,7 @@ import (
 	vlogger "github.com/rkshvish/vortara/internal/logger"
 	"github.com/rkshvish/vortara/internal/state"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
-	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 

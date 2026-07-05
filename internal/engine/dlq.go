@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 

@@ -12,7 +12,7 @@ import (
 	"github.com/rkshvish/vortara/api"
 	"github.com/rkshvish/vortara/internal/engine"
 	vlogger "github.com/rkshvish/vortara/internal/logger"
-	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 var flagAPIPort int

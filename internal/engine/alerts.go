@@ -9,7 +9,7 @@ import (
 	"time"
 
 	vlogger "github.com/rkshvish/vortara/internal/logger"
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 var alertClient = &http.Client{Timeout: 10 * time.Second}

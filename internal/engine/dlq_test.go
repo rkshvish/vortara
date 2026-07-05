@@ -15,7 +15,7 @@ import (
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -41,19 +41,19 @@ func TestDLQ_CapturesFailedRows(t *testing.T) {
 		},
 	}
 
-	cfg := &v2.PipelineConfig{
+	cfg := &pipeline.PipelineConfig{
 		Name: "dlq-test",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:      "v2test-batch",
 			Table:     "deals",
 			Watermark: "updated_at",
 			BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{{Type: "v2test-dest"}},
-		Settings: v2.SettingsConfig{
+		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
+		Settings: pipeline.SettingsConfig{
 			OnError:     "dlq",
 			DLQPath:     dlqPath,
-			Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 10},
+			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10},
 		},
 	}
 
@@ -99,7 +99,7 @@ func TestDLQ_CapturesFailedRows(t *testing.T) {
 }
 
 func TestDLQ_DisabledForSkipMode(t *testing.T) {
-	w, err := newDLQWriter(&v2.PipelineConfig{Name: "x", Settings: v2.SettingsConfig{OnError: "skip"}})
+	w, err := newDLQWriter(&pipeline.PipelineConfig{Name: "x", Settings: pipeline.SettingsConfig{OnError: "skip"}})
 	if err != nil {
 		t.Fatalf("newDLQWriter() error = %v", err)
 	}

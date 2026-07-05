@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -22,7 +22,7 @@ func benchRow() row.Row {
 }
 
 func benchProcessor(b *testing.B) *Processor {
-	p, err := New([]v2.TransformStep{
+	p, err := New([]pipeline.TransformStep{
 		{Filter: "status == 'won' AND revenue > 1000"},
 		{Rename: map[string]string{"col_0": "name"}},
 		{Add: map[string]string{"synced_at": "{{ now() }}"}},
@@ -48,7 +48,7 @@ func BenchmarkApply_FourSteps(b *testing.B) {
 }
 
 func BenchmarkApply_FilterOnly(b *testing.B) {
-	p, _ := New([]v2.TransformStep{{Filter: "revenue > 1000"}})
+	p, _ := New([]pipeline.TransformStep{{Filter: "revenue > 1000"}})
 	r := benchRow()
 	b.ReportAllocs()
 	b.ResetTimer()

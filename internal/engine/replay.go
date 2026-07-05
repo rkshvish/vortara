@@ -13,7 +13,7 @@ import (
 
 	"github.com/rkshvish/vortara/internal/router"
 	"github.com/rkshvish/vortara/internal/state"
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 

@@ -12,7 +12,7 @@ import (
 	"github.com/rkshvish/vortara/internal/router"
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/internal/steps"
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
@@ -25,25 +25,25 @@ func registerReplayMock() {
 
 var replayMockOnce = false
 
-func replayCfg(dlqPath string) *v2.PipelineConfig {
-	return &v2.PipelineConfig{
+func replayCfg(dlqPath string) *pipeline.PipelineConfig {
+	return &pipeline.PipelineConfig{
 		Name: "replay-test",
-		Source: v2.SourceConfig{
+		Source: pipeline.SourceConfig{
 			Type:      "v2test-batch",
 			Table:     "deals",
 			Watermark: "updated_at",
 			BatchSize: 10,
 		},
-		Destinations: []v2.DestinationConfig{{Type: "replay-dest"}},
-		Settings: v2.SettingsConfig{
+		Destinations: []pipeline.DestinationConfig{{Type: "replay-dest"}},
+		Settings: pipeline.SettingsConfig{
 			OnError:     "dlq",
 			DLQPath:     dlqPath,
-			Concurrency: v2.ConcurrencySettings{Workers: 1, BatchSize: 10},
+			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10},
 		},
 	}
 }
 
-func seedDLQ(t *testing.T, cfg *v2.PipelineConfig, store state.StateStore) {
+func seedDLQ(t *testing.T, cfg *pipeline.PipelineConfig, store state.StateStore) {
 	t.Helper()
 	registerV2Mocks()
 	if !replayMockOnce {

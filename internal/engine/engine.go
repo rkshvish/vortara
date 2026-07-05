@@ -9,7 +9,7 @@ import (
 
 	"github.com/rkshvish/vortara/internal/connector/destination"
 	"github.com/rkshvish/vortara/internal/state"
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 // Engine owns the v2 pipeline runtime and shared state store.

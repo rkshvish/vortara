@@ -10,7 +10,7 @@ import (
 	vlogger "github.com/rkshvish/vortara/internal/logger"
 	"github.com/rkshvish/vortara/internal/router"
 	"github.com/rkshvish/vortara/internal/steps"
-	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 

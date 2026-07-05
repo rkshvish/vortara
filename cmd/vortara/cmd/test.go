@@ -11,7 +11,7 @@ import (
 	"github.com/rkshvish/vortara/internal/connector/destination"
 	"github.com/rkshvish/vortara/internal/connector/source"
 	"github.com/rkshvish/vortara/internal/registry"
-	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
 )
 
 var testCmd = &cobra.Command{

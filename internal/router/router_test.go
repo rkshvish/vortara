@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func TestRouter_NoWhen_AlwaysReceives(t *testing.T) {
-	rt, err := New([]v2.DestinationConfig{{Type: "restapi"}})
+	rt, err := New([]pipeline.DestinationConfig{{Type: "restapi"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -20,7 +20,7 @@ func TestRouter_NoWhen_AlwaysReceives(t *testing.T) {
 }
 
 func TestRouter_When_True(t *testing.T) {
-	rt, err := New([]v2.DestinationConfig{{Type: "restapi", When: "tier == 'enterprise'"}})
+	rt, err := New([]pipeline.DestinationConfig{{Type: "restapi", When: "tier == 'enterprise'"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -31,7 +31,7 @@ func TestRouter_When_True(t *testing.T) {
 }
 
 func TestRouter_When_False(t *testing.T) {
-	rt, err := New([]v2.DestinationConfig{{Type: "restapi", When: "tier == 'enterprise'"}})
+	rt, err := New([]pipeline.DestinationConfig{{Type: "restapi", When: "tier == 'enterprise'"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRouter_When_False(t *testing.T) {
 }
 
 func TestRouter_MultipleDestinations_FanOut(t *testing.T) {
-	rt, err := New([]v2.DestinationConfig{
+	rt, err := New([]pipeline.DestinationConfig{
 		{Type: "restapi"},
 		{Type: "restapi", When: "tier == 'enterprise'"},
 		{Type: "restapi", When: "tier == 'smb'"},
@@ -61,7 +61,7 @@ func TestRouter_MultipleDestinations_FanOut(t *testing.T) {
 }
 
 func TestRouter_InvalidWhen_Error(t *testing.T) {
-	if _, err := New([]v2.DestinationConfig{{Type: "restapi", When: "invalid =="}}); err == nil {
+	if _, err := New([]pipeline.DestinationConfig{{Type: "restapi", When: "invalid =="}}); err == nil {
 		t.Fatal("New() error = nil, want error")
 	}
 }

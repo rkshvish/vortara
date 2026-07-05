@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
 
 	"github.com/rkshvish/vortara/internal/state"
 )
