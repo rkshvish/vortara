@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 type fakePool struct {

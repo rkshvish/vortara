@@ -1,4 +1,4 @@
-module github.com/rkshvish/vortaraos
+module github.com/rkshvish/vortara
 
 go 1.25.0
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 type roundTripperFunc func(*nethttp.Request) (*nethttp.Response, error)

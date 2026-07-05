@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // PostgresCDCSource streams row changes from PostgreSQL logical replication

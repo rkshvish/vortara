@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // DoWithRetry executes fn up to cfg.Attempts times with exponential backoff.

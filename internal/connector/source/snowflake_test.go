@@ -11,8 +11,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func newSnowflakeMockSource(t *testing.T) (*SnowflakeSource, sqlmock.Sqlmock) {

@@ -9,15 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/connector/source"
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/internal/router"
-	"github.com/rkshvish/vortaraos/internal/steps"
-	"github.com/rkshvish/vortaraos/internal/strategy"
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/connector/source"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/internal/router"
+	"github.com/rkshvish/vortara/internal/steps"
+	"github.com/rkshvish/vortara/internal/strategy"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 var batchSourceTypes = map[string]bool{

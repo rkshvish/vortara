@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 func TestNormalizeRedshiftURI(t *testing.T) {

@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	destpkg "github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/internal/router"
-	"github.com/rkshvish/vortaraos/internal/state"
-	"github.com/rkshvish/vortaraos/internal/steps"
-	v2 "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	destpkg "github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/internal/router"
+	"github.com/rkshvish/vortara/internal/state"
+	"github.com/rkshvish/vortara/internal/steps"
+	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // replayDest is the swappable destination used by the replay tests.

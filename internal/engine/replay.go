@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rkshvish/vortaraos/internal/router"
-	"github.com/rkshvish/vortaraos/internal/state"
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/router"
+	"github.com/rkshvish/vortara/internal/state"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // ReplayResult summarizes a DLQ replay pass.

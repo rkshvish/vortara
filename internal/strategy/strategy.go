@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/state"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/state"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // LoadStrategy defines how rows are written to a destination.

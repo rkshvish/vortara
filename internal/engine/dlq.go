@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // DLQRecord is one dead-lettered row, serialized as a JSON line.

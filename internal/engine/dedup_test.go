@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func TestDedupWindow_FirstOccurrence(t *testing.T) {

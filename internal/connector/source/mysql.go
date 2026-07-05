@@ -13,10 +13,10 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // MySQLSource extracts rows incrementally from a MySQL table.

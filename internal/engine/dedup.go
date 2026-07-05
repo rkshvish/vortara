@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // DedupWindow tracks recently seen streaming event keys.

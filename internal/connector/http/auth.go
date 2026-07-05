@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // Authenticator applies authentication to an outbound HTTP request.

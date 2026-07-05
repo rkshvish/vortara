@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // PostgresStore is a StateStore backed by PostgreSQL — for deployments where

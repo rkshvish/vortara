@@ -4,9 +4,9 @@ package destination
 import (
 	"context"
 
-	"github.com/rkshvish/vortaraos/internal/state"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/state"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // RowError captures a single row that failed to load.

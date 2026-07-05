@@ -5,13 +5,13 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/connector/source"
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	"github.com/rkshvish/vortaraos/internal/router"
-	"github.com/rkshvish/vortaraos/internal/steps"
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/connector/source"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/router"
+	"github.com/rkshvish/vortara/internal/steps"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func (e *Engine) runStreaming(ctx context.Context, cfg *v2cfg.PipelineConfig, src source.StreamingSource, proc *steps.Processor, router *router.Router, dests []destination.Destination, srcName string) error {

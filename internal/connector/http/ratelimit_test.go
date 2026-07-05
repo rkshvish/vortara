@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 func TestNewRateLimiter_NoConfig(t *testing.T) {

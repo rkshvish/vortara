@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // BatchSource is implemented by all batch (polling) source connectors.

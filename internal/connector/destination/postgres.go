@@ -19,10 +19,10 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/internal/state"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/internal/state"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // PostgresDestination writes rows to Postgres using batch upsert and COPY.

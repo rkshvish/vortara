@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/engine"
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	"github.com/rkshvish/vortaraos/internal/state"
-	conncfg "github.com/rkshvish/vortaraos/pkg/config"
-	v2config "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/engine"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/state"
+	conncfg "github.com/rkshvish/vortara/pkg/config"
+	v2config "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 var runOnce bool

@@ -6,8 +6,8 @@ import (
 
 	"github.com/segmentio/kafka-go"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 type fakeKafkaReader struct {

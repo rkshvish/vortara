@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	httpauth "github.com/rkshvish/vortaraos/internal/connector/http"
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/internal/state"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	httpauth "github.com/rkshvish/vortara/internal/connector/http"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/internal/state"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // RESTAPIDestination delivers rows to a REST API over HTTP.

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func newWebhookSourceForTest(t *testing.T, path string, opts map[string]string) *WebhookSource {

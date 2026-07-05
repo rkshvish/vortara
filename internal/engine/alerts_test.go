@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	v2 "github.com/rkshvish/vortaraos/pkg/config/v2"
+	v2 "github.com/rkshvish/vortara/pkg/config/v2"
 )
 
 func TestSendFailureAlert(t *testing.T) {

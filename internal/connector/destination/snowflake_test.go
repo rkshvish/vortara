@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 func TestParseSnowflakeDestURL(t *testing.T) {

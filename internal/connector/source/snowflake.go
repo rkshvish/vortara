@@ -12,9 +12,9 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	gosnowflake "github.com/snowflakedb/gosnowflake"
 
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 const snowflakeQueryTagSQL = "ALTER SESSION SET QUERY_TAG = 'vortara'"

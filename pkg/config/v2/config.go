@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	config "github.com/rkshvish/vortaraos/pkg/config"
+	config "github.com/rkshvish/vortara/pkg/config"
 	"gopkg.in/yaml.v3"
 )
 

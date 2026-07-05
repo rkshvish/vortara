@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/internal/engine"
+	"github.com/rkshvish/vortara/internal/engine"
 )
 
 type stubEngine struct {

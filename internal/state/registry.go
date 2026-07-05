@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // Factory creates a StateStore for a backend config.

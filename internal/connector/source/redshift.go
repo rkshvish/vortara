@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/rkshvish/vortaraos/internal/registry"
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // RedshiftSource extracts rows from Amazon Redshift. Redshift speaks the

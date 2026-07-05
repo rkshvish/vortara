@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rkshvish/vortaraos/internal/engine"
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	v2config "github.com/rkshvish/vortaraos/pkg/config/v2"
+	"github.com/rkshvish/vortara/internal/engine"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	v2config "github.com/rkshvish/vortara/pkg/config/v2"
 )
 
 var flagDLQFile string

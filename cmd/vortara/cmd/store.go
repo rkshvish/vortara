@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	v2config "github.com/rkshvish/vortaraos/pkg/config/v2"
+	v2config "github.com/rkshvish/vortara/pkg/config/v2"
 
-	"github.com/rkshvish/vortaraos/internal/state"
+	"github.com/rkshvish/vortara/internal/state"
 )
 
 func openStore(cfg *v2config.PipelineConfig) (state.StateStore, error) {

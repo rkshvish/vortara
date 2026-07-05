@@ -41,13 +41,13 @@ Postgres · MySQL · Redshift · Snowflake · BigQuery · REST API · Kafka · W
 ## Install
 
 ```bash
-go install github.com/rkshvish/vortaraos/cmd/vortara@latest
+go install github.com/rkshvish/vortara/cmd/vortara@latest
 ```
 
 Or with Docker:
 
 ```bash
-docker run --rm -v $(pwd):/pipelines ghcr.io/rkshvish/vortaraos run /pipelines/pipeline.yaml
+docker run --rm -v $(pwd):/pipelines ghcr.io/rkshvish/vortara run /pipelines/pipeline.yaml
 ```
 
 ## Quick start

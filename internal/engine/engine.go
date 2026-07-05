@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/state"
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/state"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
 )
 
 // Engine owns the v2 pipeline runtime and shared state store.

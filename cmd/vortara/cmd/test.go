@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rkshvish/vortaraos/internal/connector/destination"
-	"github.com/rkshvish/vortaraos/internal/connector/source"
-	"github.com/rkshvish/vortaraos/internal/registry"
-	v2config "github.com/rkshvish/vortaraos/pkg/config/v2"
+	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/connector/source"
+	"github.com/rkshvish/vortara/internal/registry"
+	v2config "github.com/rkshvish/vortara/pkg/config/v2"
 )
 
 var testCmd = &cobra.Command{

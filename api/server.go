@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/internal/engine"
+	"github.com/rkshvish/vortara/internal/engine"
 )
 
 // Version is stamped by the CLI at startup so /health and /version report

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 func TestDoWithRetry_Success_FirstAttempt(t *testing.T) {

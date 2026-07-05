@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	vlogger "github.com/rkshvish/vortaraos/internal/logger"
-	v2cfg "github.com/rkshvish/vortaraos/pkg/config/v2"
+	vlogger "github.com/rkshvish/vortara/internal/logger"
+	v2cfg "github.com/rkshvish/vortara/pkg/config/v2"
 )
 
 var alertClient = &http.Client{Timeout: 10 * time.Second}

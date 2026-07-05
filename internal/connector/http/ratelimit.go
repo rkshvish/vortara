@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // CommonRateLimits lists common API rate limits for reference.

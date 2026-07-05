@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 func TestCircuitBreaker_InitiallyClosed(t *testing.T) {

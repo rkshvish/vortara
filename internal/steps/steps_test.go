@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	v2 "github.com/rkshvish/vortaraos/pkg/config/v2"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	v2 "github.com/rkshvish/vortara/pkg/config/v2"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func TestProcessor_Filter_Pass(t *testing.T) {

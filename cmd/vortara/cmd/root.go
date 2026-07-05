@@ -8,12 +8,12 @@ import (
 	"github.com/spf13/cobra"
 
 	// Register all connectors via their init() functions.
-	_ "github.com/rkshvish/vortaraos/internal/connector/destination"
-	_ "github.com/rkshvish/vortaraos/internal/connector/source"
+	_ "github.com/rkshvish/vortara/internal/connector/destination"
+	_ "github.com/rkshvish/vortara/internal/connector/source"
 )
 
 // version is stamped at build time via:
-//   -ldflags "-X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=v0.1.0"
+//   -ldflags "-X github.com/rkshvish/vortara/cmd/vortara/cmd.version=v0.1.0"
 var version = "dev"
 
 var rootCmd = &cobra.Command{

@@ -4,8 +4,8 @@ package source
 import (
 	"context"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
-	"github.com/rkshvish/vortaraos/pkg/row"
+	"github.com/rkshvish/vortara/pkg/config"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 // StreamingSource is implemented by all real-time streaming source connectors.

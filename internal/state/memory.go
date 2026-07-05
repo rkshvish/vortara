@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rkshvish/vortaraos/pkg/config"
+	"github.com/rkshvish/vortara/pkg/config"
 )
 
 // MemoryStore is a thread-safe in-memory StateStore used only in tests.
