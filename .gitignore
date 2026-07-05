@@ -21,3 +21,4 @@ dist/
 .vscode/
 *.dlq.jsonl
 working-example/state/
+examples/test.yaml
