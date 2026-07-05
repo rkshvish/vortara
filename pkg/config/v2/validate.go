@@ -85,6 +85,11 @@ func Validate(cfg *PipelineConfig) error {
 		"snowflake":    true,
 		"restapi":      true,
 		"googlesheets": true,
+		"klaviyo":      true,
+		"mixpanel":     true,
+		"zendesk":      true,
+		"pipedrive":    true,
+		"intercom":     true,
 	}
 	validStrategies := map[string]bool{
 		"merge":         true,
@@ -109,7 +114,7 @@ func Validate(cfg *PipelineConfig) error {
 		}
 		strategy := d.Strategy
 		if strategy == "" {
-			if d.Type == "restapi" || d.Type == "slack" || d.Type == "googlesheets" {
+			if d.Type == "restapi" || d.Type == "slack" || d.Type == "googlesheets" || d.Type == "mixpanel" {
 				strategy = "append"
 			} else {
 				strategy = "merge"
@@ -139,7 +144,7 @@ func Validate(cfg *PipelineConfig) error {
 		for i, d := range cfg.Destinations {
 			strategy := d.Strategy
 			if strategy == "" {
-				if d.Type == "restapi" || d.Type == "slack" || d.Type == "googlesheets" {
+				if d.Type == "restapi" || d.Type == "slack" || d.Type == "googlesheets" || d.Type == "mixpanel" {
 					strategy = "append"
 				} else {
 					strategy = "merge"

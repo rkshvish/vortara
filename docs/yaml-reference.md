@@ -156,10 +156,15 @@ destinations:
 | `restapi` | `url` | append (default) |
 | `salesforce` | `url`, `object`, `auth` | merge |
 | `hubspot` | `object`, `auth` | merge |
+| `klaviyo` | `auth`, `match_on` (email \| phone_number \| external_id) | merge |
+| `mixpanel` | `auth`, options: `project_token`, `distinct_id` | append (default) |
+| `intercom` | `auth`, options: `object` (contacts \| companies) | merge |
+| `pipedrive` | `auth`, options: `object` (persons \| deals \| organizations \| leads) | merge |
+| `zendesk` | `url`, `auth`, options: `object` (users \| tickets) | merge |
 | `slack` | `webhook`, `message` | append (default) |
 | `googlesheets` | `spreadsheet_id`, credentials | append (default) |
 
-`strategy` defaults to `merge` (`append` for restapi/slack/googlesheets). `merge` and
+`strategy` defaults to `merge` (`append` for restapi/slack/googlesheets/mixpanel). `merge` and
 `delete+insert` require `match_on`. `scd2` (postgres only) keeps type-2 history: changed rows close the current
 version (`_scd_valid_to`, `_scd_is_current=false`) and insert a new one;
 unchanged rows are untouched. The three history columns are added to the

@@ -191,7 +191,7 @@ func applyDefaults(cfg *PipelineConfig) {
 	for i := range cfg.Destinations {
 		if cfg.Destinations[i].Strategy == "" {
 			switch cfg.Destinations[i].Type {
-			case "restapi", "slack", "googlesheets":
+			case "restapi", "slack", "googlesheets", "mixpanel":
 				cfg.Destinations[i].Strategy = "append"
 			default:
 				cfg.Destinations[i].Strategy = "merge"
