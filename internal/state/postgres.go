@@ -41,8 +41,44 @@ func init() {
 
 var validPrefix = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
+// PostgresOption configures the connection pool for a PostgresStore.
+type PostgresOption func(*postgresConfig)
+
+type postgresConfig struct {
+	maxOpenConns    int
+	maxIdleConns    int
+	connMaxLifetime time.Duration
+}
+
+// WithMaxOpenConns sets the maximum number of open database connections.
+func WithMaxOpenConns(n int) PostgresOption {
+	return func(c *postgresConfig) {
+		if n > 0 {
+			c.maxOpenConns = n
+		}
+	}
+}
+
+// WithMaxIdleConns sets the maximum number of idle database connections.
+func WithMaxIdleConns(n int) PostgresOption {
+	return func(c *postgresConfig) {
+		if n > 0 {
+			c.maxIdleConns = n
+		}
+	}
+}
+
+// WithConnMaxLifetime sets the maximum lifetime of a connection.
+func WithConnMaxLifetime(d time.Duration) PostgresOption {
+	return func(c *postgresConfig) {
+		if d > 0 {
+			c.connMaxLifetime = d
+		}
+	}
+}
+
 // NewPostgresStore connects and ensures the state schema exists.
-func NewPostgresStore(dsn, prefix string) (*PostgresStore, error) {
+func NewPostgresStore(dsn, prefix string, opts ...PostgresOption) (*PostgresStore, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		return nil, errors.New("postgres state backend: settings.state.connection is required")
@@ -55,12 +91,22 @@ func NewPostgresStore(dsn, prefix string) (*PostgresStore, error) {
 		return nil, fmt.Errorf("postgres state backend: invalid key_prefix %q (lowercase letters, digits, underscores)", prefix)
 	}
 
+	cfg := postgresConfig{
+		maxOpenConns:    5,
+		maxIdleConns:    5,
+		connMaxLifetime: 5 * time.Minute,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetMaxOpenConns(cfg.maxOpenConns)
+	db.SetMaxIdleConns(cfg.maxIdleConns)
+	db.SetConnMaxLifetime(cfg.connMaxLifetime)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {

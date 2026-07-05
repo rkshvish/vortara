@@ -182,3 +182,72 @@ func TestPostgresStore_Integration_RegistryAndPrefix(t *testing.T) {
 		t.Fatal("empty connection must be rejected")
 	}
 }
+
+// TestPostgresStore_Integration_PoolOptions verifies that WithMaxOpenConns,
+// WithMaxIdleConns, and WithConnMaxLifetime are accepted without error.
+func TestPostgresStore_Integration_PoolOptions(t *testing.T) {
+	ctx := context.Background()
+	dsn := startStatePostgres(t)
+
+	store, err := NewPostgresStore(dsn, "vortara",
+		WithMaxOpenConns(3),
+		WithMaxIdleConns(2),
+		WithConnMaxLifetime(30*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewPostgresStore with pool options: %v", err)
+	}
+	defer store.Close()
+
+	// Functional smoke-test: write and read through the pool.
+	ts := time.Now().UTC().Truncate(time.Second)
+	if err := store.SetWatermark(ctx, "pool-p", "pool-s", ts); err != nil {
+		t.Fatalf("SetWatermark: %v", err)
+	}
+	got, err := store.GetWatermark(ctx, "pool-p", "pool-s")
+	if err != nil {
+		t.Fatalf("GetWatermark: %v", err)
+	}
+	if !got.Equal(ts) {
+		t.Fatalf("watermark = %v, want %v", got, ts)
+	}
+}
+
+// TestPostgresStore_Integration_RollbackBatch verifies that rows buffered
+// inside a batch are discarded by RollbackBatch and never reach the DB.
+func TestPostgresStore_Integration_RollbackBatch(t *testing.T) {
+	ctx := context.Background()
+	dsn := startStatePostgres(t)
+
+	store, err := NewPostgresStore(dsn, "vortara")
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.BeginBatch(ctx); err != nil {
+		t.Fatalf("BeginBatch: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		rowID := fmt.Sprintf("rollback-row-%d", i)
+		if err := store.MarkDelivered(ctx, rowID, "p-rollback", "d1"); err != nil {
+			t.Fatalf("MarkDelivered: %v", err)
+		}
+	}
+	// In-batch visibility must be true before rollback.
+	if ok, _ := store.IsDelivered(ctx, "rollback-row-0", "p-rollback", "d1"); !ok {
+		t.Fatal("row should be visible inside the batch before rollback")
+	}
+
+	if err := store.RollbackBatch(); err != nil {
+		t.Fatalf("RollbackBatch: %v", err)
+	}
+
+	// After rollback nothing must have been flushed to the DB.
+	for i := 0; i < 5; i++ {
+		rowID := fmt.Sprintf("rollback-row-%d", i)
+		if ok, err := store.IsDelivered(ctx, rowID, "p-rollback", "d1"); err != nil || ok {
+			t.Fatalf("row %d should NOT be delivered after rollback (ok=%v, err=%v)", i, ok, err)
+		}
+	}
+}
