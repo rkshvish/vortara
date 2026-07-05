@@ -1,0 +1,33 @@
+name: snowflake-to-hubspot
+source:
+  type: snowflake
+  url: ${SNOWFLAKE_DSN}
+  table: DIM_ACCOUNTS
+  watermark: UPDATED_AT
+  batch_size: 500
+
+transform:
+  - filter: "status == 'active'"
+  - rename:
+      account_name: name
+      account_domain: domain
+      arr: annualrevenue
+  - drop:
+      - internal_id
+      - created_by
+
+destinations:
+  - type: hubspot
+    auth:
+      type: bearer
+      token: ${HUBSPOT_TOKEN}
+    match_on: [domain]
+    strategy: merge
+    rate_limit: "100/10s"
+
+cron: "0 * * * *"
+
+settings:
+  state:
+    backend: sqlite
+    path: ./vortara/state.db

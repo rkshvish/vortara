@@ -1,0 +1,28 @@
+name: kafka-to-hubspot
+source:
+  type: kafka
+  brokers:
+    - ${KAFKA_BROKER}
+  topic: signups
+  group_id: vortara-signups
+  flush:
+    interval: 5s
+    records: 100
+transform:
+  - filter: "event_type == 'signup'"
+  - rename:
+      email: email
+      first_name: firstname
+destinations:
+  - type: hubspot
+    auth:
+      type: bearer
+      token: ${HUBSPOT_TOKEN}
+    object: contacts
+    match_on:
+      - email
+    strategy: merge
+settings:
+  state:
+    backend: sqlite
+    path: ./vortara/state.db

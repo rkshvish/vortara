@@ -1,0 +1,20 @@
+name: pg-to-webhook
+source:
+  type: postgres
+  url: postgres://vortara:vortara@localhost:15433/warehouse?sslmode=disable
+  table: b2b_saas.usage_sessions
+  watermark: session_start
+  batch_size: 100000
+
+destinations:
+  - type: restapi
+    url: http://localhost:18081/webhook
+    strategy: append
+
+settings:
+  state:
+    backend: sqlite
+    path: ./working-example/state/vortara.db
+  log:
+    level: info
+    format: text

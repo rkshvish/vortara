@@ -1,0 +1,14 @@
+.git/
+dist/
+bin/
+vortara
+*.test
+*.out
+*.db
+*.dlq.jsonl
+docs/
+examples/
+*.docx
+*.jsx
+*.md
+!README.md

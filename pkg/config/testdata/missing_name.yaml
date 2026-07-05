@@ -1,0 +1,13 @@
+pipeline:
+  description: Missing pipeline name
+  schedule:
+    interval: 15m
+  source:
+    type: postgres
+    connection: postgres://localhost:5432/sales
+  destinations:
+    warehouse:
+      type: postgres
+      connection: postgres://localhost:5432/warehouse
+  route:
+    - destination: warehouse

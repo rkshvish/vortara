@@ -1,0 +1,16 @@
+name: postgres-to-webhook
+source:
+  type: postgres
+  url: ${POSTGRES_URL}
+  table: b2b_saas.usage_sessions
+  watermark: session_start
+  batch_size: 100
+destinations:
+  - type: restapi
+    url: ${WEBHOOK_URL}
+    strategy: append
+cron: "*/5 * * * *"
+settings:
+  state:
+    backend: sqlite
+    path: ./vortara/state.db

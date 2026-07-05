@@ -1,0 +1,30 @@
+name: postgres-to-salesforce
+source:
+  type: postgres
+  url: ${POSTGRES_URL}
+  table: deals
+  watermark: updated_at
+transform:
+  - filter: "status == 'won'"
+  - rename:
+      deal_name: Name
+      deal_id: ExternalId__c
+      revenue: Amount
+destinations:
+  - type: salesforce
+    url: ${SF_INSTANCE_URL}
+    auth:
+      type: oauth2
+      client_id: ${SF_CLIENT_ID}
+      client_secret: ${SF_CLIENT_SECRET}
+      token_url: ${SF_TOKEN_URL}
+    object: Opportunity
+    match_on:
+      - ExternalId__c
+    strategy: merge
+
+cron: "*/15 * * * *"
+settings:
+  state:
+    backend: sqlite
+    path: ./vortara/state.db

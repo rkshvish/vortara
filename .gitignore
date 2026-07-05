@@ -1,0 +1,23 @@
+# Binaries
+bin/
+/vortara
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.out
+
+# Build artifacts
+dist/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.dlq.jsonl
+working-example/state/

@@ -1,0 +1,20 @@
+pipeline:
+  name: sales-sync
+  description: Sync sales data
+  schedule:
+    interval: 15m
+  source:
+    type: postgres
+    connection: postgres://localhost:5432/sales
+    table: deals
+  transform:
+    - map:
+        deal_name: name
+  destinations:
+    warehouse:
+      type: postgres
+      connection: postgres://localhost:5432/warehouse
+      match_on: deal_id
+  route:
+    - destination: warehouse
+      condition: always

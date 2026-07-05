@@ -1,0 +1,30 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build multi-platform binaries
+        run: |
+          GOOS=linux   GOARCH=amd64 go build -ldflags "-s -w -X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=${GITHUB_REF_NAME}" -o dist/vortara-linux-amd64   ./cmd/vortara
+          GOOS=linux   GOARCH=arm64 go build -ldflags "-s -w -X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=${GITHUB_REF_NAME}" -o dist/vortara-linux-arm64   ./cmd/vortara
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "-s -w -X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=${GITHUB_REF_NAME}" -o dist/vortara-darwin-amd64  ./cmd/vortara
+          GOOS=darwin  GOARCH=arm64 go build -ldflags "-s -w -X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=${GITHUB_REF_NAME}" -o dist/vortara-darwin-arm64  ./cmd/vortara
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X github.com/rkshvish/vortaraos/cmd/vortara/cmd.version=${GITHUB_REF_NAME}" -o dist/vortara-windows-amd64.exe ./cmd/vortara
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
