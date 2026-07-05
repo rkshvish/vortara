@@ -42,6 +42,7 @@ func startStatePostgres(t *testing.T) string {
 // method against real Postgres, including persistence across a store
 // reopen — the property that makes shared state possible.
 func TestPostgresStore_Integration_FullContract(t *testing.T) {
+	ctx := context.Background()
 	dsn := startStatePostgres(t)
 
 	store, err := NewPostgresStore(dsn, "vortara")
@@ -162,6 +163,7 @@ func TestPostgresStore_Integration_FullContract(t *testing.T) {
 // TestPostgresStore_Integration_RegistryAndPrefix verifies Build() routing
 // and custom table prefixes.
 func TestPostgresStore_Integration_RegistryAndPrefix(t *testing.T) {
+	ctx := context.Background()
 	dsn := startStatePostgres(t)
 
 	store, err := NewPostgresStore(dsn, "custom_prefix")
