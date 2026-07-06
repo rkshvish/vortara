@@ -1,5 +1,4 @@
-// Package state defines the storage contract used by Vortara to persist
-// batch watermarks, streaming offsets, run history, and delivery idempotency.
+// Package state defines the storage contract for sync state.
 package state
 
 import (
@@ -7,81 +6,63 @@ import (
 	"time"
 )
 
-// RunStats holds the result of a completed pipeline run.
-type RunStats struct {
-	RowsExtracted int
-	RowsLoaded    int
-	RowsSkipped   int
-	RowsErrored   int
-	Status        string // "success" | "failed" | "timeout"
-	Error         string // empty if success
-}
-
-// RunLog is one entry from the run history.
-type RunLog struct {
-	ID            int64
-	Pipeline      string
-	Mode          string // "batch" | "streaming"
-	StartedAt     time.Time
-	FinishedAt    time.Time
-	RowsExtracted int
-	RowsLoaded    int
-	RowsSkipped   int
-	RowsErrored   int
-	Status        string
-	Error         string
-}
-
 // StateStore is the interface all state backends must implement.
 type StateStore interface {
-	// GetWatermark returns the last processed watermark for a pipeline+source.
-	// Returns zero time.Time if no watermark exists yet (first run).
-	GetWatermark(ctx context.Context, pipeline, source string) (time.Time, error)
+	// --- Entity state ---
 
-	// SetWatermark saves the watermark for a pipeline+source.
-	SetWatermark(ctx context.Context, pipeline, source string, wm time.Time) error
+	// GetEntityState retrieves the current state for one entity.
+	// Returns nil, nil when the entity has never been seen.
+	GetEntityState(ctx context.Context, syncName, destination, entityKey string) (*EntityState, error)
 
-	// GetNumericWatermark returns the last integer cursor (0 if unset)
-	// for sources using an integer watermark column.
-	GetNumericWatermark(ctx context.Context, pipeline, source string) (int64, error)
+	// SaveEntityState persists entity state. Upserts on (syncName, destination, entityKey).
+	SaveEntityState(ctx context.Context, s *EntityState) error
 
-	// SetNumericWatermark saves the integer cursor for a pipeline+source.
-	SetNumericWatermark(ctx context.Context, pipeline, source string, wm int64) error
+	// ListEntityStates returns stored entity states for a sync+destination, paginated.
+	ListEntityStates(ctx context.Context, syncName, destination string, limit, offset int) ([]*EntityState, error)
 
-	// GetOffset returns the last committed offset for a topic+partition.
-	// Returns -1 if no offset exists yet (start from beginning).
-	GetOffset(ctx context.Context, pipeline, topic string, partition int) (int64, error)
+	// ResetEntityState removes the stored state for one entity, causing it to
+	// be treated as first_seen on the next run.
+	ResetEntityState(ctx context.Context, syncName, destination, entityKey string) error
 
-	// SetOffset saves the committed offset for a topic+partition.
-	SetOffset(ctx context.Context, pipeline, topic string, partition int, offset int64) error
+	// --- Rule firings (once: true tracking) ---
+
+	// HasRuleFired returns true if the named rule has already fired for this entity.
+	HasRuleFired(ctx context.Context, syncName, destination, entityKey, rule string) (bool, error)
+
+	// MarkRuleFired records that a rule fired for this entity.
+	MarkRuleFired(ctx context.Context, syncName, destination, entityKey, rule string) error
+
+	// --- Decision events (for explain / history) ---
+
+	// RecordDecision persists a decision event for audit and explain.
+	RecordDecision(ctx context.Context, event *DecisionEvent) error
+
+	// GetDecisionHistory returns recent decision events for one entity.
+	GetDecisionHistory(ctx context.Context, syncName, destination, entityKey string, limit int) ([]*DecisionEvent, error)
+
+	// --- Run log ---
 
 	// StartRun creates a new run log entry and returns its ID.
-	// mode is "batch" or "streaming".
-	StartRun(ctx context.Context, pipeline, mode string) (int64, error)
+	StartRun(ctx context.Context, syncName, mode string) (int64, error)
 
 	// FinishRun updates the run log entry with final stats.
 	FinishRun(ctx context.Context, runID int64, stats RunStats) error
 
-	// GetLastRun returns the most recent run log entry for a pipeline.
-	// Returns error if no runs exist yet.
-	GetLastRun(ctx context.Context, pipeline string) (RunLog, error)
+	// GetLastRun returns the most recent run log entry for a sync.
+	GetLastRun(ctx context.Context, syncName string) (RunLog, error)
 
-	// GetRunHistory returns the most recent run log entries for a pipeline.
-	GetRunHistory(ctx context.Context, pipeline string, limit int) ([]RunLog, error)
+	// GetRunHistory returns the most recent run log entries for a sync.
+	GetRunHistory(ctx context.Context, syncName string, limit int) ([]RunLog, error)
 
-	// IsDelivered returns true if this row was already delivered
-	// to this destination in this pipeline.
-	IsDelivered(ctx context.Context, rowID, pipeline, destination string) (bool, error)
+	// --- Delivery idempotency (used by destination connectors) ---
 
-	// MarkDelivered records that a row was successfully delivered.
-	MarkDelivered(ctx context.Context, rowID, pipeline, destination string) error
+	// IsDelivered returns true if this row key was already successfully delivered.
+	IsDelivered(ctx context.Context, rowID, syncName, destination string) (bool, error)
 
-	// PruneDelivered deletes delivery-log entries older than the cutoff.
-	// Safe because the watermark guarantees rows older than the extraction
-	// horizon are never re-checked; returns the number of entries removed.
-	PruneDelivered(ctx context.Context, olderThan time.Time) (int64, error)
+	// MarkDelivered records successful delivery of a row.
+	MarkDelivered(ctx context.Context, rowID, syncName, destination string) error
 
-	// BeginBatch starts buffering delivery writes in memory.
+	// BeginBatch starts buffering delivery writes.
 	BeginBatch(ctx context.Context) error
 
 	// CommitBatch atomically flushes buffered delivery writes.
@@ -90,6 +71,18 @@ type StateStore interface {
 	// RollbackBatch discards buffered delivery writes.
 	RollbackBatch() error
 
-	// Close releases all resources held by the state store.
+	// Close releases all resources.
 	Close() error
+
+	// --- Pipeline locks (prevents concurrent runs of the same sync) ---
+
+	// LockRun acquires an exclusive run lock for the named sync.
+	// Returns an error if the sync is already locked and the lock has not expired.
+	LockRun(ctx context.Context, syncName, owner string, ttl time.Duration) error
+
+	// UnlockRun releases the run lock for the named sync.
+	UnlockRun(ctx context.Context, syncName string) error
+
+	// HeartbeatLock extends the expiry of the lock held by owner.
+	HeartbeatLock(ctx context.Context, syncName, owner string, ttl time.Duration) error
 }

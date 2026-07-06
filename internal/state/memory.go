@@ -1,149 +1,179 @@
-// Package state provides a thread-safe in-memory StateStore implementation for use in tests only.
+// Package state provides a thread-safe in-memory StateStore for use in tests.
 package state
 
 import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/rkshvish/vortara/pkg/config"
 )
 
-// MemoryStore is a thread-safe in-memory StateStore used only in tests.
-type MemoryStore struct {
-	mu                sync.RWMutex
-	watermarks        map[string]time.Time
-	numericWatermarks map[string]int64
-	offsets           map[string]int64
-	runs       map[int64]RunLog
-	nextRunID  int64
-	deliveries map[string]bool
-	batchMu    sync.Mutex
-	pending    map[string]bool
-	inBatch    bool
-}
-
-var _ StateStore = (*MemoryStore)(nil)
-
 func init() {
-	Register("memory", func(cfg config.StateConfig) (StateStore, error) {
+	Register("memory", func(cfg stateConfig) (StateStore, error) {
 		return NewMemoryStore(), nil
 	})
 }
 
-// NewMemoryStore returns an in-memory StateStore.
-// All data is lost when the store is closed or process exits.
-// Use only in tests.
+type memLockEntry struct {
+	owner     string
+	expiresAt time.Time
+}
+
+// MemoryStore is a thread-safe in-memory StateStore used only in tests.
+type MemoryStore struct {
+	mu           sync.RWMutex
+	entityStates map[string]*EntityState
+	ruleFirings  map[string]time.Time
+	decisions    []*DecisionEvent
+	runs         map[int64]RunLog
+	nextRunID    int64
+	deliveries   map[string]bool
+	batchMu      sync.Mutex
+	pending      map[string]bool
+	inBatch      bool
+	locks        map[string]memLockEntry
+}
+
+var _ StateStore = (*MemoryStore)(nil)
+
+// NewMemoryStore returns an empty in-memory StateStore.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		watermarks: make(map[string]time.Time),
-		offsets:    make(map[string]int64),
-		runs:       make(map[int64]RunLog),
-		deliveries: make(map[string]bool),
-		pending:    make(map[string]bool),
+		entityStates: make(map[string]*EntityState),
+		ruleFirings:  make(map[string]time.Time),
+		decisions:    nil,
+		runs:         make(map[int64]RunLog),
+		deliveries:   make(map[string]bool),
+		pending:      make(map[string]bool),
+		locks:        make(map[string]memLockEntry),
 	}
 }
 
-func watermarkKey(pipeline, source string) string {
-	return pipeline + ":" + source
+func entityStateKey(syncName, destination, entityKey string) string {
+	return strings.Join([]string{syncName, destination, entityKey}, "\x00")
 }
 
-func offsetKey(pipeline, topic string, partition int) string {
-	return pipeline + ":" + topic + ":" + strconv.Itoa(partition)
+func ruleFiringKey(syncName, destination, entityKey, rule string) string {
+	return strings.Join([]string{syncName, destination, entityKey, rule}, "\x00")
 }
 
-func deliveryKey(rowID, pipeline, destination string) string {
-	return rowID + ":" + pipeline + ":" + destination
-}
+// --- Entity state ---
 
-// GetNumericWatermark returns the last integer cursor for a pipeline+source.
-func (s *MemoryStore) GetNumericWatermark(ctx context.Context, pipeline, source string) (int64, error) {
+func (s *MemoryStore) GetEntityState(_ context.Context, syncName, destination, entityKey string) (*EntityState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.numericWatermarks[watermarkKey(pipeline, source)], nil
+	es := s.entityStates[entityStateKey(syncName, destination, entityKey)]
+	if es == nil {
+		return nil, nil
+	}
+	cp := *es
+	return &cp, nil
 }
 
-// SetNumericWatermark saves the integer cursor for a pipeline+source.
-func (s *MemoryStore) SetNumericWatermark(ctx context.Context, pipeline, source string, wm int64) error {
+func (s *MemoryStore) SaveEntityState(_ context.Context, es *EntityState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.numericWatermarks == nil {
-		s.numericWatermarks = make(map[string]int64)
-	}
-	s.numericWatermarks[watermarkKey(pipeline, source)] = wm
+	cp := *es
+	s.entityStates[entityStateKey(es.SyncName, es.Destination, es.EntityKey)] = &cp
 	return nil
 }
 
-// GetWatermark returns the last processed watermark for a pipeline and source.
-func (s *MemoryStore) GetWatermark(ctx context.Context, pipeline, source string) (time.Time, error) {
+func (s *MemoryStore) ListEntityStates(_ context.Context, syncName, destination string, limit, offset int) ([]*EntityState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	if wm, ok := s.watermarks[watermarkKey(pipeline, source)]; ok {
-		return wm, nil
+	var all []*EntityState
+	for _, es := range s.entityStates {
+		if es.SyncName == syncName && es.Destination == destination {
+			cp := *es
+			all = append(all, &cp)
+		}
 	}
-	return time.Time{}, nil
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].UpdatedAt.After(all[j].UpdatedAt)
+	})
+	if offset >= len(all) {
+		return nil, nil
+	}
+	all = all[offset:]
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
 }
 
-// SetWatermark saves the watermark for a pipeline and source.
-func (s *MemoryStore) SetWatermark(ctx context.Context, pipeline, source string, wm time.Time) error {
+func (s *MemoryStore) ResetEntityState(_ context.Context, syncName, destination, entityKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	s.watermarks[watermarkKey(pipeline, source)] = wm.UTC()
+	delete(s.entityStates, entityStateKey(syncName, destination, entityKey))
 	return nil
 }
 
-// GetOffset returns the last committed offset for a pipeline, topic, and partition.
-func (s *MemoryStore) GetOffset(ctx context.Context, pipeline, topic string, partition int) (int64, error) {
+// --- Rule firings ---
+
+func (s *MemoryStore) HasRuleFired(_ context.Context, syncName, destination, entityKey, rule string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	if offset, ok := s.offsets[offsetKey(pipeline, topic, partition)]; ok {
-		return offset, nil
-	}
-	return -1, nil
+	_, ok := s.ruleFirings[ruleFiringKey(syncName, destination, entityKey, rule)]
+	return ok, nil
 }
 
-// SetOffset saves the committed offset for a pipeline, topic, and partition.
-func (s *MemoryStore) SetOffset(ctx context.Context, pipeline, topic string, partition int, offset int64) error {
+func (s *MemoryStore) MarkRuleFired(_ context.Context, syncName, destination, entityKey, rule string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	s.offsets[offsetKey(pipeline, topic, partition)] = offset
+	s.ruleFirings[ruleFiringKey(syncName, destination, entityKey, rule)] = time.Now().UTC()
 	return nil
 }
 
-// StartRun creates a new run log entry and returns its ID.
-func (s *MemoryStore) StartRun(ctx context.Context, pipeline, mode string) (int64, error) {
+// --- Decision events ---
+
+func (s *MemoryStore) RecordDecision(_ context.Context, event *DecisionEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cp := *event
+	s.decisions = append(s.decisions, &cp)
+	return nil
+}
 
+func (s *MemoryStore) GetDecisionHistory(_ context.Context, syncName, destination, entityKey string, limit int) ([]*DecisionEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*DecisionEvent
+	for i := len(s.decisions) - 1; i >= 0; i-- {
+		ev := s.decisions[i]
+		if ev.SyncName == syncName && ev.Destination == destination && ev.EntityKey == entityKey {
+			cp := *ev
+			out = append(out, &cp)
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// --- Run log ---
+
+func (s *MemoryStore) StartRun(_ context.Context, syncName, mode string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.nextRunID++
 	id := s.nextRunID
 	s.runs[id] = RunLog{
-		ID:        id,
-		Pipeline:  pipeline,
-		Mode:      mode,
-		StartedAt: time.Now().UTC(),
-		Status:    "running",
+		ID: id, SyncName: syncName, Mode: mode,
+		StartedAt: time.Now().UTC(), Status: "running",
 	}
 	return id, nil
 }
 
-// FinishRun updates a run log entry with final statistics.
-func (s *MemoryStore) FinishRun(ctx context.Context, runID int64, stats RunStats) error {
+func (s *MemoryStore) FinishRun(_ context.Context, runID int64, stats RunStats) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	run, ok := s.runs[runID]
 	if !ok {
 		return fmt.Errorf("state: run %d not found", runID)
 	}
-
 	run.FinishedAt = time.Now().UTC()
 	run.RowsExtracted = stats.RowsExtracted
 	run.RowsLoaded = stats.RowsLoaded
@@ -155,65 +185,56 @@ func (s *MemoryStore) FinishRun(ctx context.Context, runID int64, stats RunStats
 	return nil
 }
 
-// GetLastRun returns the most recent run log entry for a pipeline.
-func (s *MemoryStore) GetLastRun(ctx context.Context, pipeline string) (RunLog, error) {
-	history, err := s.GetRunHistory(ctx, pipeline, 1)
+func (s *MemoryStore) GetLastRun(ctx context.Context, syncName string) (RunLog, error) {
+	history, err := s.GetRunHistory(ctx, syncName, 1)
 	if err != nil {
 		return RunLog{}, err
 	}
 	if len(history) == 0 {
-		return RunLog{}, fmt.Errorf("state: no runs found for pipeline %q", pipeline)
+		return RunLog{}, fmt.Errorf("state: no runs found for %q", syncName)
 	}
 	return history[0], nil
 }
 
-// GetRunHistory returns the most recent run log entries for a pipeline.
-func (s *MemoryStore) GetRunHistory(ctx context.Context, pipeline string, limit int) ([]RunLog, error) {
-	if limit <= 0 {
-		return []RunLog{}, nil
-	}
-
+func (s *MemoryStore) GetRunHistory(_ context.Context, syncName string, limit int) ([]RunLog, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	logs := make([]RunLog, 0, len(s.runs))
+	var logs []RunLog
 	for _, run := range s.runs {
-		if run.Pipeline == pipeline {
+		if run.SyncName == syncName {
 			logs = append(logs, run)
 		}
 	}
-
 	sort.Slice(logs, func(i, j int) bool {
-		if logs[i].StartedAt.Equal(logs[j].StartedAt) {
-			return logs[i].ID > logs[j].ID
-		}
 		return logs[i].StartedAt.After(logs[j].StartedAt)
 	})
-	if len(logs) > limit {
+	if limit > 0 && len(logs) > limit {
 		logs = logs[:limit]
 	}
 	return logs, nil
 }
 
-// IsDelivered reports whether a row has already been delivered.
-func (s *MemoryStore) IsDelivered(ctx context.Context, rowID, pipeline, destination string) (bool, error) {
-	key := deliveryKey(rowID, pipeline, destination)
+// --- Delivery idempotency ---
+
+func memDeliveryKey(rowID, syncName, destination string) string {
+	return rowID + "\x00" + syncName + "\x00" + destination
+}
+
+func (s *MemoryStore) IsDelivered(_ context.Context, rowID, syncName, destination string) (bool, error) {
+	key := memDeliveryKey(rowID, syncName, destination)
 	s.batchMu.Lock()
 	if s.inBatch && s.pending[key] {
 		s.batchMu.Unlock()
 		return true, nil
 	}
 	s.batchMu.Unlock()
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	return s.deliveries[key], nil
 }
 
-// MarkDelivered records that a row was successfully delivered.
-func (s *MemoryStore) MarkDelivered(ctx context.Context, rowID, pipeline, destination string) error {
-	key := deliveryKey(rowID, pipeline, destination)
+func (s *MemoryStore) MarkDelivered(_ context.Context, rowID, syncName, destination string) error {
+	key := memDeliveryKey(rowID, syncName, destination)
 	s.batchMu.Lock()
 	if s.inBatch {
 		s.pending[key] = true
@@ -221,21 +242,13 @@ func (s *MemoryStore) MarkDelivered(ctx context.Context, rowID, pipeline, destin
 		return nil
 	}
 	s.batchMu.Unlock()
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	s.deliveries[key] = true
 	return nil
 }
 
-// PruneDelivered is a no-op for the in-memory store (no timestamps kept).
-func (s *MemoryStore) PruneDelivered(ctx context.Context, olderThan time.Time) (int64, error) {
-	return 0, nil
-}
-
-// BeginBatch starts buffering delivery writes in memory.
-func (s *MemoryStore) BeginBatch(ctx context.Context) error {
+func (s *MemoryStore) BeginBatch(_ context.Context) error {
 	s.batchMu.Lock()
 	defer s.batchMu.Unlock()
 	for k := range s.pending {
@@ -245,27 +258,20 @@ func (s *MemoryStore) BeginBatch(ctx context.Context) error {
 	return nil
 }
 
-// CommitBatch flushes buffered delivery writes atomically.
-func (s *MemoryStore) CommitBatch(ctx context.Context) error {
+func (s *MemoryStore) CommitBatch(_ context.Context) error {
 	s.batchMu.Lock()
 	pending := s.pending
 	s.pending = make(map[string]bool)
 	s.inBatch = false
 	s.batchMu.Unlock()
-
-	if len(pending) == 0 {
-		return nil
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key := range pending {
-		s.deliveries[key] = true
+	for k := range pending {
+		s.deliveries[k] = true
 	}
 	return nil
 }
 
-// RollbackBatch discards buffered delivery writes.
 func (s *MemoryStore) RollbackBatch() error {
 	s.batchMu.Lock()
 	defer s.batchMu.Unlock()
@@ -274,7 +280,34 @@ func (s *MemoryStore) RollbackBatch() error {
 	return nil
 }
 
-// Close releases all resources held by the store.
-func (s *MemoryStore) Close() error {
+func (s *MemoryStore) Close() error { return nil }
+
+// --- Pipeline locks ---
+
+func (s *MemoryStore) LockRun(_ context.Context, syncName, owner string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if entry, ok := s.locks[syncName]; ok && entry.expiresAt.After(now) {
+		return fmt.Errorf("state: sync %q is already running (lock held by %q) — use 'vortara state unlock' to clear a stale lock", syncName, entry.owner)
+	}
+	s.locks[syncName] = memLockEntry{owner: owner, expiresAt: now.Add(ttl)}
+	return nil
+}
+
+func (s *MemoryStore) UnlockRun(_ context.Context, syncName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.locks, syncName)
+	return nil
+}
+
+func (s *MemoryStore) HeartbeatLock(_ context.Context, syncName, owner string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry, ok := s.locks[syncName]; ok && entry.owner == owner {
+		entry.expiresAt = time.Now().Add(ttl)
+		s.locks[syncName] = entry
+	}
 	return nil
 }

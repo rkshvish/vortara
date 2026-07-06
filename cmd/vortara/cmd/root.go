@@ -1,4 +1,4 @@
-// Package cmd contains the Vortara CLI commands.
+// Package cmd contains the CLI commands for the sync engine.
 package cmd
 
 import (
@@ -19,8 +19,8 @@ var version = "dev"
 var rootCmd = &cobra.Command{
 	Use:          "vortara",
 	Version:      version,
-	Short:        "Vortara — Simple ETL + Reverse ETL",
-	Long:         "Vortara moves data between sources and destinations.",
+	Short:        "Programmable State Reverse ETL",
+	Long:         "Define when records create, update, skip, retry, suppress, or trigger actions — with every decision explainable.",
 	SilenceUsage: true,
 }
 
@@ -33,13 +33,14 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(startCmd)
-	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(validateCmd)
+	rootCmd.AddCommand(dryRunCmd)
+	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(replayCmd)
+	rootCmd.AddCommand(explainCmd)
 	rootCmd.AddCommand(historyCmd)
-	rootCmd.AddCommand(watermarkCmd)
-	rootCmd.AddCommand(offsetCmd)
-	rootCmd.AddCommand(testCmd)
+	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(dlqCmd)
+	rootCmd.AddCommand(testCmd)
 }
