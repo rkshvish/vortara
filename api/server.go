@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rkshvish/vortara/internal/engine"
+	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
 
 // Version is stamped by the CLI at startup so /health and /version report
@@ -18,12 +19,13 @@ import (
 var Version = "dev"
 
 type statsProvider interface {
-	Stats(ctx context.Context) engine.PipelineStats
+	Stats(ctx context.Context, cfg *synccfg.SyncSpec) engine.SyncStats
 }
 
 // Server serves health and metrics endpoints for one engine.
 type Server struct {
 	engine  statsProvider
+	cfg     *synccfg.SyncSpec
 	startAt time.Time
 	port    int
 	srv     *http.Server
@@ -31,17 +33,18 @@ type Server struct {
 	mu      sync.RWMutex
 }
 
-// NewServer creates a new API server for an engine.
-func NewServer(eng *engine.Engine, port int) *Server {
-	return newServer(eng, port)
+// NewServer creates a new API server for an engine and its sync config.
+func NewServer(eng *engine.Engine, cfg *synccfg.SyncSpec, port int) *Server {
+	return newServer(eng, cfg, port)
 }
 
-func newServer(provider statsProvider, port int) *Server {
+func newServer(provider statsProvider, cfg *synccfg.SyncSpec, port int) *Server {
 	if port == 0 {
 		port = 9090
 	}
 	return &Server{
 		engine:  provider,
+		cfg:     cfg,
 		startAt: time.Now(),
 		port:    port,
 	}
@@ -100,10 +103,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":         "ok",
 		"version":        Version,
 		"uptime_seconds": int64(time.Since(s.startAt).Seconds()),
-		"pipelines": []map[string]any{
+		"syncs": []map[string]any{
 			{
 				"name":             stats.Name,
-				"mode":             stats.Mode,
 				"status":           stats.Status,
 				"last_run_at":      formatTime(stats.LastRunAt),
 				"last_status":      stats.LastStatus,
@@ -170,11 +172,11 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"version": Version})
 }
 
-func (s *Server) stats(ctx context.Context) engine.PipelineStats {
+func (s *Server) stats(ctx context.Context) engine.SyncStats {
 	if s.engine == nil {
-		return engine.PipelineStats{}
+		return engine.SyncStats{}
 	}
-	return s.engine.Stats(ctx)
+	return s.engine.Stats(ctx, s.cfg)
 }
 
 func (s *Server) address() string {

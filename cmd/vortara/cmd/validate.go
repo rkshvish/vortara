@@ -6,27 +6,26 @@ import (
 
 	"github.com/spf13/cobra"
 
-	v2config "github.com/rkshvish/vortara/pkg/config/pipeline"
+	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
 
 var validateCmd = &cobra.Command{
-	Use:   "validate <pipeline.yaml>",
-	Short: "Validate a pipeline config file",
+	Use:   "validate <sync.yaml>",
+	Short: "Validate a sync config file",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runValidate,
 }
 
-func runValidate(cmd *cobra.Command, args []string) error {
-	path := args[0]
-	cfg, err := v2config.Load(path)
+func runValidate(_ *cobra.Command, args []string) error {
+	f, err := synccfg.Load(args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		return err
 	}
-	if err := v2config.Validate(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Validation errors:\n%v\n", err)
+	if err := synccfg.Validate(f); err != nil {
+		fmt.Fprintf(os.Stderr, "Validation error: %v\n", err)
 		return err
 	}
-	fmt.Printf("✓ %s is valid\n", path)
+	fmt.Printf("OK %s is valid (sync: %s)\n", args[0], f.Sync.Name)
 	return nil
 }

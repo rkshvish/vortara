@@ -13,7 +13,8 @@ import (
 )
 
 // version is stamped at build time via:
-//   -ldflags "-X github.com/rkshvish/vortara/cmd/vortara/cmd.version=v0.1.0"
+//
+//	-ldflags "-X github.com/rkshvish/vortara/cmd/vortara/cmd.version=v0.1.0"
 var version = "dev"
 
 var rootCmd = &cobra.Command{

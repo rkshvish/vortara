@@ -4,22 +4,20 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
-	v2cfg "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
-// DLQRecord is one dead-lettered row, serialized as a JSON line.
+// DLQRecord is one dead-lettered row serialized as a JSON line.
 type DLQRecord struct {
-	RowID      string                 `json:"row_id"`
-	Pipeline   string                 `json:"pipeline"`
-	PrimaryKey string                 `json:"primary_key"`
-	Error      string                 `json:"error"`
-	FailedAt   time.Time              `json:"failed_at"`
-	Data       map[string]interface{} `json:"data"`
+	RowID     string         `json:"row_id"`
+	SyncName  string         `json:"sync_name"`
+	EntityKey string         `json:"entity_key"`
+	Error     string         `json:"error"`
+	FailedAt  time.Time      `json:"failed_at"`
+	Data      map[string]any `json:"data"`
 }
 
 // dlqWriter appends failed rows to a JSONL dead-letter file.
@@ -28,25 +26,21 @@ type dlqWriter struct {
 	mu       sync.Mutex
 	f        *os.File
 	path     string
-	pipeline string
+	syncName string
 	count    int
 }
 
-// newDLQWriter returns an active writer when settings.on_error is "dlq",
-// or a disabled (nil) writer for skip/retry modes. The file is opened lazily
-// on the first Write so successful runs never create an empty DLQ file.
-func newDLQWriter(cfg *v2cfg.PipelineConfig) (*dlqWriter, error) {
-	if cfg == nil || strings.ToLower(strings.TrimSpace(cfg.Settings.OnError)) != "dlq" {
+// newDLQWriter returns an active writer if path is non-empty.
+func newDLQWriter(syncName, path string) (*dlqWriter, error) {
+	if path == "" {
 		return nil, nil
 	}
-	return &dlqWriter{pipeline: cfg.Name, path: ResolveDLQPath(cfg)}, nil
+	return &dlqWriter{syncName: syncName, path: path}, nil
 }
 
-// Enabled reports whether dead-lettering is active.
 func (w *dlqWriter) Enabled() bool { return w != nil }
 
-// Write appends one failed row to the DLQ file.
-func (w *dlqWriter) Write(r row.Row, cause error) error {
+func (w *dlqWriter) Write(r row.Row, entityKey string, cause error) error {
 	if w == nil {
 		return nil
 	}
@@ -65,25 +59,17 @@ func (w *dlqWriter) Write(r row.Row, cause error) error {
 		w.f = f
 	}
 	rec := DLQRecord{
-		RowID:      r.ID,
-		Pipeline:   w.pipeline,
-		PrimaryKey: r.PrimaryKey,
-		Error:      cause.Error(),
-		FailedAt:   time.Now().UTC(),
-		Data:       r.Data,
+		RowID: r.ID, SyncName: w.syncName, EntityKey: entityKey,
+		Error: cause.Error(), FailedAt: time.Now().UTC(), Data: r.Data,
 	}
-	line, err := json.Marshal(rec)
-	if err != nil {
-		return err
+	line, _ := json.Marshal(rec)
+	_, err := w.f.Write(append(line, '\n'))
+	if err == nil {
+		w.count++
 	}
-	if _, err := w.f.Write(append(line, '\n')); err != nil {
-		return err
-	}
-	w.count++
-	return nil
+	return err
 }
 
-// Count returns the number of rows dead-lettered so far.
 func (w *dlqWriter) Count() int {
 	if w == nil {
 		return 0
@@ -93,7 +79,6 @@ func (w *dlqWriter) Count() int {
 	return w.count
 }
 
-// Path returns the dead-letter file path.
 func (w *dlqWriter) Path() string {
 	if w == nil {
 		return ""
@@ -101,7 +86,6 @@ func (w *dlqWriter) Path() string {
 	return w.path
 }
 
-// Close closes the underlying file if one was opened.
 func (w *dlqWriter) Close() error {
 	if w == nil {
 		return nil
@@ -114,4 +98,12 @@ func (w *dlqWriter) Close() error {
 	err := w.f.Close()
 	w.f = nil
 	return err
+}
+
+// ResolveDLQPath is exported for use by CLI commands.
+func ResolveDLQPath(syncName, dlqPath string) string {
+	if dlqPath != "" {
+		return dlqPath
+	}
+	return "./dlq/" + syncName + ".dlq.jsonl"
 }

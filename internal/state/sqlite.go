@@ -120,6 +120,7 @@ func (s *SQLiteStore) initSchema() error {
 			rows_loaded    INTEGER NOT NULL DEFAULT 0,
 			rows_skipped   INTEGER NOT NULL DEFAULT 0,
 			rows_errored   INTEGER NOT NULL DEFAULT 0,
+			high_watermark DATETIME,
 			status         TEXT NOT NULL DEFAULT 'running',
 			error          TEXT NOT NULL DEFAULT ''
 		)`,
@@ -143,6 +144,8 @@ func (s *SQLiteStore) initSchema() error {
 			return fmt.Errorf("state: ddl: %w", err)
 		}
 	}
+	// Idempotent column additions for databases created before this column existed.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE run_log ADD COLUMN high_watermark DATETIME`)
 	return nil
 }
 
@@ -159,11 +162,11 @@ func (s *SQLiteStore) GetEntityState(ctx context.Context, syncName, destination,
 		syncName, destination, entityKey)
 
 	var (
-		destID, curFP, prevFP                 string
-		curPayJSON, prevPayJSON, remJSON       string
-		lastDecision, lastStatus              string
-		consMissing, version                  int
-		createdAt, updatedAt                  time.Time
+		destID, curFP, prevFP            string
+		curPayJSON, prevPayJSON, remJSON string
+		lastDecision, lastStatus         string
+		consMissing, version             int
+		createdAt, updatedAt             time.Time
 	)
 	err := row.Scan(&destID, &curFP, &prevFP,
 		&curPayJSON, &prevPayJSON, &remJSON,
@@ -243,11 +246,11 @@ func (s *SQLiteStore) ListEntityStates(ctx context.Context, syncName, destinatio
 	var out []*EntityState
 	for rows.Next() {
 		var (
-			ek, destID, curFP, prevFP             string
-			curPayJSON, prevPayJSON, remJSON       string
-			lastDecision, lastStatus              string
-			consMissing, version                  int
-			createdAt, updatedAt                  time.Time
+			ek, destID, curFP, prevFP        string
+			curPayJSON, prevPayJSON, remJSON string
+			lastDecision, lastStatus         string
+			consMissing, version             int
+			createdAt, updatedAt             time.Time
 		)
 		if err := rows.Scan(&ek, &destID, &curFP, &prevFP,
 			&curPayJSON, &prevPayJSON, &remJSON,
@@ -329,9 +332,9 @@ func (s *SQLiteStore) GetDecisionHistory(ctx context.Context, syncName, destinat
 	var out []*DecisionEvent
 	for rows.Next() {
 		var (
-			id, runID                      int64
-			decision, rulesJSON, reasJSON  string
-			createdAt                      time.Time
+			id, runID                     int64
+			decision, rulesJSON, reasJSON string
+			createdAt                     time.Time
 		)
 		if err := rows.Scan(&id, &runID, &decision, &rulesJSON, &reasJSON, &createdAt); err != nil {
 			return nil, err
@@ -361,15 +364,19 @@ func (s *SQLiteStore) StartRun(ctx context.Context, syncName, mode string) (int6
 }
 
 func (s *SQLiteStore) FinishRun(ctx context.Context, runID int64, stats RunStats) error {
+	var wm any
+	if !stats.HighWatermark.IsZero() {
+		wm = stats.HighWatermark.UTC()
+	}
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE run_log SET
 			finished_at=?, rows_extracted=?, rows_loaded=?,
-			rows_skipped=?, rows_errored=?, status=?, error=?
+			rows_skipped=?, rows_errored=?, high_watermark=?, status=?, error=?
 		WHERE id=?`,
 		time.Now().UTC(),
 		stats.RowsExtracted, stats.RowsLoaded,
 		stats.RowsSkipped, stats.RowsErrored,
-		stats.Status, stats.Error, runID)
+		wm, stats.Status, stats.Error, runID)
 	return err
 }
 
@@ -390,7 +397,8 @@ func (s *SQLiteStore) GetRunHistory(ctx context.Context, syncName string, limit 
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, sync_name, mode, started_at, finished_at,
-		       rows_extracted, rows_loaded, rows_skipped, rows_errored, status, error
+		       rows_extracted, rows_loaded, rows_skipped, rows_errored,
+		       high_watermark, status, error
 		FROM run_log WHERE sync_name=?
 		ORDER BY started_at DESC LIMIT ?`, syncName, limit)
 	if err != nil {
@@ -400,17 +408,21 @@ func (s *SQLiteStore) GetRunHistory(ctx context.Context, syncName string, limit 
 	var out []RunLog
 	for rows.Next() {
 		var (
-			rl         RunLog
-			finishedAt sql.NullTime
+			rl            RunLog
+			finishedAt    sql.NullTime
+			highWatermark sql.NullTime
 		)
 		if err := rows.Scan(&rl.ID, &rl.SyncName, &rl.Mode,
 			&rl.StartedAt, &finishedAt,
 			&rl.RowsExtracted, &rl.RowsLoaded, &rl.RowsSkipped, &rl.RowsErrored,
-			&rl.Status, &rl.Error); err != nil {
+			&highWatermark, &rl.Status, &rl.Error); err != nil {
 			return nil, err
 		}
 		if finishedAt.Valid {
 			rl.FinishedAt = finishedAt.Time
+		}
+		if highWatermark.Valid {
+			rl.HighWatermark = highWatermark.Time
 		}
 		out = append(out, rl)
 	}

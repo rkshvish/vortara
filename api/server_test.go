@@ -12,18 +12,19 @@ import (
 	"time"
 
 	"github.com/rkshvish/vortara/internal/engine"
+	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
 
 type stubEngine struct {
-	stats engine.PipelineStats
+	stats engine.SyncStats
 }
 
-func (s *stubEngine) Stats(ctx context.Context) engine.PipelineStats {
+func (s *stubEngine) Stats(_ context.Context, _ *synccfg.SyncSpec) engine.SyncStats {
 	return s.stats
 }
 
 func TestServer_Health(t *testing.T) {
-	srv := newServer(&stubEngine{stats: engine.PipelineStats{Name: "deals-sync", Mode: "batch", Status: "running"}}, 0)
+	srv := newServer(&stubEngine{stats: engine.SyncStats{Name: "deals-sync", Status: "running"}}, nil, 0)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -39,16 +40,16 @@ func TestServer_Health(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Fatalf("unexpected body: %+v", body)
 	}
-	if _, ok := body["pipelines"]; !ok {
-		t.Fatalf("expected pipelines field: %+v", body)
+	if _, ok := body["syncs"]; !ok {
+		t.Fatalf("expected syncs field: %+v", body)
 	}
-	pipelines, ok := body["pipelines"].([]any)
-	if !ok || len(pipelines) != 1 {
-		t.Fatalf("expected one pipeline entry, got %+v", body["pipelines"])
+	syncs, ok := body["syncs"].([]any)
+	if !ok || len(syncs) != 1 {
+		t.Fatalf("expected one sync entry, got %+v", body["syncs"])
 	}
-	entry, ok := pipelines[0].(map[string]any)
+	entry, ok := syncs[0].(map[string]any)
 	if !ok {
-		t.Fatalf("expected map pipeline entry, got %#v", pipelines[0])
+		t.Fatalf("expected map sync entry, got %#v", syncs[0])
 	}
 	if d, ok := entry["duration_seconds"].(float64); !ok || d < 0 {
 		t.Fatalf("expected non-negative duration_seconds, got %#v", entry["duration_seconds"])
@@ -56,14 +57,14 @@ func TestServer_Health(t *testing.T) {
 }
 
 func TestServer_Metrics(t *testing.T) {
-	srv := newServer(&stubEngine{stats: engine.PipelineStats{
+	srv := newServer(&stubEngine{stats: engine.SyncStats{
 		Name:            "deals-sync",
 		RowsLoaded:      1234,
 		RowsSkipped:     89,
 		RowsErrored:     5,
 		LastStatus:      "success",
 		LastRunDuration: 12400 * time.Millisecond,
-	}}, 0)
+	}}, nil, 0)
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
 
@@ -84,33 +85,32 @@ func TestServer_Metrics(t *testing.T) {
 	}
 }
 
-func TestServer_Health_PipelineStatus(t *testing.T) {
-	srv := newServer(&stubEngine{stats: engine.PipelineStats{
+func TestServer_Health_SyncStatus(t *testing.T) {
+	srv := newServer(&stubEngine{stats: engine.SyncStats{
 		Name:       "deals-sync",
-		Mode:       "batch",
 		Status:     "idle",
 		LastStatus: "success",
-	}}, 0)
+	}}, nil, 0)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
 	srv.handleHealth(rec, req)
 
 	var body struct {
-		Pipelines []struct {
+		Syncs []struct {
 			LastStatus string `json:"last_status"`
-		} `json:"pipelines"`
+		} `json:"syncs"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if len(body.Pipelines) != 1 || body.Pipelines[0].LastStatus != "success" {
+	if len(body.Syncs) != 1 || body.Syncs[0].LastStatus != "success" {
 		t.Fatalf("unexpected body: %+v", body)
 	}
 }
 
 func TestServer_Stop(t *testing.T) {
-	srv := newServer(&stubEngine{stats: engine.PipelineStats{Name: "pipe"}}, 0)
+	srv := newServer(&stubEngine{stats: engine.SyncStats{Name: "pipe"}}, nil, 0)
 	if err := srv.Stop(); err != nil {
 		t.Fatalf("Stop() error = %v", err)
 	}
@@ -120,7 +120,7 @@ func TestServer_Stop(t *testing.T) {
 }
 
 func TestServer_Concurrent(t *testing.T) {
-	srv := newServer(&stubEngine{stats: engine.PipelineStats{Name: "pipe", Mode: "batch", Status: "idle"}}, 0)
+	srv := newServer(&stubEngine{stats: engine.SyncStats{Name: "pipe", Status: "idle"}}, nil, 0)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	var wg sync.WaitGroup
 	errCh := make(chan error, 10)

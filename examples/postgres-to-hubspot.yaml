@@ -1,0 +1,30 @@
+name: postgres-to-hubspot
+source:
+  type: postgres
+  url: ${POSTGRES_URL}
+  table: contacts
+  watermark: updated_at
+  batch_size: 100
+
+transform:
+  - filter: "status == 'active'"
+  - rename:
+      first_name: firstname
+      last_name: lastname
+      job_title: jobtitle
+      arr: annualrevenue
+
+destinations:
+  - type: hubspot
+    auth:
+      type: bearer
+      token: ${HUBSPOT_TOKEN}
+    options:
+      object: contacts
+    match_on: [email]
+    strategy: merge
+
+settings:
+  state:
+    backend: sqlite
+    path: ./vortara/state.db

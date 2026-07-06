@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	runForceUnlock   bool
-	runApproveHash   string
+	runForceUnlock bool
+	runApproveHash string
 )
 
 var runCmd = &cobra.Command{

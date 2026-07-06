@@ -6,9 +6,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
+
+// TransformStep defines one transform applied to a row.
+type TransformStep struct {
+	Filter  string            `yaml:"filter,omitempty"`
+	Rename  map[string]string `yaml:"rename,omitempty"`
+	Add     map[string]string `yaml:"add,omitempty"`
+	Drop    []string          `yaml:"drop,omitempty"`
+	Mask    []string          `yaml:"mask,omitempty"`
+	Trim    []string          `yaml:"trim,omitempty"`
+	Flatten string            `yaml:"flatten,omitempty"`
+}
 
 // Processor applies a sequence of transform steps to each row.
 type Processor struct {
@@ -20,7 +30,7 @@ type Processor struct {
 type stepFn func(r row.Row) (row.Row, bool)
 
 // New builds a Processor from pipeline transform step config.
-func New(steps []pipeline.TransformStep) (*Processor, error) {
+func New(steps []TransformStep) (*Processor, error) {
 	fns := make([]stepFn, 0, len(steps))
 	mutates := false
 

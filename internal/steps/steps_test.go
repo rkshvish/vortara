@@ -4,12 +4,11 @@ import (
 	"testing"
 	"time"
 
-	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func TestProcessor_Filter_Pass(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "status == 'won'"}})
+	p, err := New([]TransformStep{{Filter: "status == 'won'"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -23,7 +22,7 @@ func TestProcessor_Filter_Pass(t *testing.T) {
 }
 
 func TestProcessor_Filter_Drop(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "status == 'won'"}})
+	p, err := New([]TransformStep{{Filter: "status == 'won'"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -34,7 +33,7 @@ func TestProcessor_Filter_Drop(t *testing.T) {
 }
 
 func TestProcessor_Filter_AND(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "status == 'won' AND revenue > 10000"}})
+	p, err := New([]TransformStep{{Filter: "status == 'won' AND revenue > 10000"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -49,7 +48,7 @@ func TestProcessor_Filter_AND(t *testing.T) {
 }
 
 func TestProcessor_Filter_OR(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "status == 'won' OR revenue > 50000"}})
+	p, err := New([]TransformStep{{Filter: "status == 'won' OR revenue > 50000"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -64,7 +63,7 @@ func TestProcessor_Filter_OR(t *testing.T) {
 }
 
 func TestProcessor_Filter_NOT(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "NOT status == 'draft'"}})
+	p, err := New([]TransformStep{{Filter: "NOT status == 'draft'"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -79,7 +78,7 @@ func TestProcessor_Filter_NOT(t *testing.T) {
 }
 
 func TestProcessor_Filter_Contains(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Filter: "contains(email, '@company.com')"}})
+	p, err := New([]TransformStep{{Filter: "contains(email, '@company.com')"}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -94,7 +93,7 @@ func TestProcessor_Filter_Contains(t *testing.T) {
 }
 
 func TestProcessor_Rename(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Rename: map[string]string{"deal_name": "Name", "revenue": "Amount"}}})
+	p, err := New([]TransformStep{{Rename: map[string]string{"deal_name": "Name", "revenue": "Amount"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -111,7 +110,7 @@ func TestProcessor_Rename(t *testing.T) {
 }
 
 func TestProcessor_Add_Literal(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Add: map[string]string{"source_system": "'postgres'"}}})
+	p, err := New([]TransformStep{{Add: map[string]string{"source_system": "'postgres'"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -122,7 +121,7 @@ func TestProcessor_Add_Literal(t *testing.T) {
 }
 
 func TestProcessor_Add_Now(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Add: map[string]string{"synced_at": "now()"}}})
+	p, err := New([]TransformStep{{Add: map[string]string{"synced_at": "now()"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -140,7 +139,7 @@ func TestProcessor_Add_Now(t *testing.T) {
 }
 
 func TestProcessor_Add_If(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Add: map[string]string{"tier": "if revenue > 100000 then 'enterprise' else 'smb'"}}})
+	p, err := New([]TransformStep{{Add: map[string]string{"tier": "if revenue > 100000 then 'enterprise' else 'smb'"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -155,7 +154,7 @@ func TestProcessor_Add_If(t *testing.T) {
 }
 
 func TestProcessor_Add_FieldRef(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Add: map[string]string{"copy": "original_field"}}})
+	p, err := New([]TransformStep{{Add: map[string]string{"copy": "original_field"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -166,7 +165,7 @@ func TestProcessor_Add_FieldRef(t *testing.T) {
 }
 
 func TestProcessor_Drop(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Drop: []string{"internal_notes", "debug"}}})
+	p, err := New([]TransformStep{{Drop: []string{"internal_notes", "debug"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -186,7 +185,7 @@ func TestProcessor_Drop(t *testing.T) {
 }
 
 func TestProcessor_Mask(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Mask: []string{"ssn", "credit_card"}}})
+	p, err := New([]TransformStep{{Mask: []string{"ssn", "credit_card"}}})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -208,7 +207,7 @@ func TestProcessor_ChainedSteps(t *testing.T) {
 		"credit_card": "1234",
 	}, time.Now())
 
-	p, err := New([]pipeline.TransformStep{
+	p, err := New([]TransformStep{
 		{Filter: "status == 'won'"},
 		{Rename: map[string]string{"deal_name": "Name"}},
 		{Add: map[string]string{"tier": "if revenue > 100000 then 'enterprise' else 'smb'"}},

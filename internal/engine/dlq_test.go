@@ -2,82 +2,39 @@ package engine
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
-	destpkg "github.com/rkshvish/vortara/internal/connector/destination"
-	"github.com/rkshvish/vortara/internal/router"
-	"github.com/rkshvish/vortara/internal/state"
-	"github.com/rkshvish/vortara/internal/steps"
-	conncfg "github.com/rkshvish/vortara/pkg/config"
-	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
-type failingDestination struct{}
-
-func (f *failingDestination) Connect(ctx context.Context, cfg conncfg.DestinationConfig) error {
-	return nil
-}
-
-func (f *failingDestination) Load(ctx context.Context, rows []row.Row, store state.StateStore, pipeline, destination string) (destpkg.LoadResult, error) {
-	return destpkg.LoadResult{}, errors.New("destination exploded")
-}
-
-func (f *failingDestination) Close() error { return nil }
-
-func TestDLQ_CapturesFailedRows(t *testing.T) {
-	registerV2Mocks()
-	dlqPath := filepath.Join(t.TempDir(), "test.dlq.jsonl")
-	currentV2BatchSource = &mockV2BatchSource{
-		rows: []row.Row{
-			row.NewRow("src", "pipe", "pk1", map[string]interface{}{"status": "won"}, time.Now().UTC()),
-			row.NewRow("src", "pipe", "pk2", map[string]interface{}{"status": "lost"}, time.Now().UTC()),
-		},
-	}
-
-	cfg := &pipeline.PipelineConfig{
-		Name: "dlq-test",
-		Source: pipeline.SourceConfig{
-			Type:      "v2test-batch",
-			Table:     "deals",
-			Watermark: "updated_at",
-			BatchSize: 10,
-		},
-		Destinations: []pipeline.DestinationConfig{{Type: "v2test-dest"}},
-		Settings: pipeline.SettingsConfig{
-			OnError:     "dlq",
-			DLQPath:     dlqPath,
-			Concurrency: pipeline.ConcurrencySettings{Workers: 1, BatchSize: 10},
-		},
-	}
-
-	eng := NewEngine(state.NewMemoryStore())
-	rt, err := router.New(cfg.Destinations)
+func TestDLQ_WritesRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.dlq.jsonl")
+	w, err := newDLQWriter("my-sync", path)
 	if err != nil {
-		t.Fatalf("router.New() error = %v", err)
+		t.Fatalf("newDLQWriter() error = %v", err)
 	}
-	proc, err := steps.New(cfg.Transform)
-	if err != nil {
-		t.Fatalf("steps.New() error = %v", err)
-	}
-
-	dest := &failingDestination{}
-	// With on_error: dlq, a run whose rows all fail should still succeed.
-	if err := eng.runBatchOnce(context.Background(), cfg, currentV2BatchSource, proc, rt, []destpkg.Destination{dest}, "v2test-batch"); err != nil {
-		t.Fatalf("runBatchOnce() error = %v, want nil (dlq absorbs failures)", err)
+	if !w.Enabled() {
+		t.Fatal("expected writer to be enabled")
 	}
 
-	f, err := os.Open(dlqPath)
+	r := row.Row{ID: "row-1", PrimaryKey: "id=1", Data: map[string]any{"status": "won"}}
+	if err := w.Write(r, "id=1", errors.New("dest exploded")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	f, err := os.Open(path)
 	if err != nil {
-		t.Fatalf("open dlq file: %v", err)
+		t.Fatalf("open dlq: %v", err)
 	}
 	defer f.Close()
+
 	var records []DLQRecord
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -87,30 +44,52 @@ func TestDLQ_CapturesFailedRows(t *testing.T) {
 		}
 		records = append(records, rec)
 	}
-	if len(records) != 2 {
-		t.Fatalf("dlq records = %d, want 2", len(records))
+	if len(records) != 1 {
+		t.Fatalf("dlq records = %d, want 1", len(records))
 	}
-	if records[0].Pipeline != "dlq-test" || records[0].Error != "destination exploded" {
-		t.Fatalf("record = %+v", records[0])
+	if records[0].SyncName != "my-sync" {
+		t.Fatalf("SyncName = %q, want my-sync", records[0].SyncName)
 	}
-	if records[0].Data["status"] == nil {
-		t.Fatalf("record data missing: %+v", records[0])
+	if records[0].Error != "dest exploded" {
+		t.Fatalf("Error = %q, want dest exploded", records[0].Error)
+	}
+	if records[0].Data["status"] != "won" {
+		t.Fatalf("Data = %+v", records[0].Data)
+	}
+	if w.Count() != 1 {
+		t.Fatalf("Count() = %d, want 1", w.Count())
 	}
 }
 
-func TestDLQ_DisabledForSkipMode(t *testing.T) {
-	w, err := newDLQWriter(&pipeline.PipelineConfig{Name: "x", Settings: pipeline.SettingsConfig{OnError: "skip"}})
+func TestDLQ_Disabled(t *testing.T) {
+	w, err := newDLQWriter("x", "")
 	if err != nil {
 		t.Fatalf("newDLQWriter() error = %v", err)
 	}
-	if w.Enabled() {
-		t.Fatal("dlq should be disabled for on_error: skip")
+	if w != nil && w.Enabled() {
+		t.Fatal("empty path should produce disabled writer")
 	}
-	// Nil-safety.
-	if err := w.Write(row.Row{}, errors.New("x")); err != nil {
-		t.Fatalf("Write on disabled writer = %v", err)
+	// nil-safe methods
+	var nilWriter *dlqWriter
+	if nilWriter.Enabled() {
+		t.Fatal("nil writer should not be enabled")
 	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Close on disabled writer = %v", err)
+	if err := nilWriter.Write(row.Row{}, "", errors.New("x")); err != nil {
+		t.Fatalf("Write on nil writer = %v", err)
+	}
+	if err := nilWriter.Close(); err != nil {
+		t.Fatalf("Close on nil writer = %v", err)
+	}
+	if nilWriter.Count() != 0 {
+		t.Fatal("Count on nil writer should be 0")
+	}
+}
+
+func TestDLQ_ResolvePath(t *testing.T) {
+	if got := ResolveDLQPath("my-sync", ""); got != "./dlq/my-sync.dlq.jsonl" {
+		t.Fatalf("ResolveDLQPath default = %q", got)
+	}
+	if got := ResolveDLQPath("my-sync", "/tmp/custom.jsonl"); got != "/tmp/custom.jsonl" {
+		t.Fatalf("ResolveDLQPath custom = %q", got)
 	}
 }

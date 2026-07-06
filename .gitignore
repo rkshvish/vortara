@@ -22,7 +22,12 @@ dist/
 *.dlq.jsonl
 working-example/state/
 examples/test.yaml
+state/
+*.db
+
+.env
 
 VortaraOS.jsx
 coverage.txt
 vortara-architecture.docx
+vortara-programmable-state-reverse-etl-architecture.md

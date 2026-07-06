@@ -3,12 +3,11 @@ package steps
 import (
 	"testing"
 
-	pipeline "github.com/rkshvish/vortara/pkg/config/pipeline"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
 func TestTrimStep(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Trim: []string{"*"}}})
+	p, err := New([]TransformStep{{Trim: []string{"*"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +21,7 @@ func TestTrimStep(t *testing.T) {
 		t.Fatal("input mutated")
 	}
 
-	p, _ = New([]pipeline.TransformStep{{Trim: []string{"a"}}})
+	p, _ = New([]TransformStep{{Trim: []string{"a"}}})
 	r = row.Row{Data: map[string]interface{}{"a": " x ", "z": " y "}}
 	out, _ = p.Apply(r)
 	if out.Data["a"] != "x" || out.Data["z"] != " y " {
@@ -31,7 +30,7 @@ func TestTrimStep(t *testing.T) {
 }
 
 func TestFlattenStep(t *testing.T) {
-	p, err := New([]pipeline.TransformStep{{Flatten: "_"}})
+	p, err := New([]TransformStep{{Flatten: "_"}})
 	if err != nil {
 		t.Fatal(err)
 	}

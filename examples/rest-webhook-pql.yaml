@@ -1,0 +1,106 @@
+sync:
+  name: pql-to-webhook
+  description: "Postgres PQL → REST webhook demo — fires when a lead becomes MQL or SQL"
+
+  source:
+    type: postgres
+    url: "${DATABASE_URL}"
+    query: |
+      SELECT
+        id,
+        email,
+        first_name,
+        last_name,
+        company,
+        title,
+        lead_score,
+        lifecycle_stage,
+        last_activity_at,
+        created_at
+      FROM leads
+      WHERE lead_score IS NOT NULL
+    entity_key: id
+    watermark:
+      column: last_activity_at
+
+  required:
+    - email
+    - lead_score
+
+  mapping:
+    - source: id
+    - source: email
+    - source: first_name
+      dest: firstName
+    - source: last_name
+      dest: lastName
+    - source: company
+    - source: title
+    - source: lead_score
+      dest: leadScore
+    - source: lifecycle_stage
+      dest: lifecycleStage
+    - source: last_activity_at
+      dest: lastActivityAt
+      exclude_from_fingerprint: true
+    - source: created_at
+      dest: createdAt
+      exclude_from_fingerprint: true
+
+  state:
+    backend: sqlite
+    path: ./state/pql-to-webhook.db
+    fingerprint:
+      exclude:
+        - lastActivityAt
+        - createdAt
+
+  decisions:
+    default: skip
+    rules:
+      - name: new-mql
+        when: first_seen()
+        action: create
+
+      - name: became-sql
+        when:
+          transitioned:
+            field: lifecycleStage
+            from: mql
+            to: sql
+        action: update
+        remember:
+          became_sql_at: now()
+
+      - name: high-score-jump
+        when:
+          fingerprint_changed: {}
+        action: update
+
+  on_missing_from_source:
+    action: skip
+    after_missing_runs: 5
+
+  destination:
+    type: restapi
+    url: "${WEBHOOK_URL}"
+    auth:
+      type: bearer
+      token: "${WEBHOOK_TOKEN}"
+    method: POST
+
+  safety:
+    max_creates_per_run: 500
+    max_updates_per_run: 1000
+
+  errors:
+    on_error: skip
+    dlq:
+      path: ./dlq/pql-to-webhook.dlq.jsonl
+      on_status: [429, 500, 502, 503]
+    retry:
+      on_status: [429, 500, 502, 503]
+      attempts: 3
+      backoff: exponential
+      initial_delay: 1s
+      max_delay: 30s

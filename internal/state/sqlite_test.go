@@ -20,94 +20,94 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	return store
 }
 
-// TestSQLiteStore_Watermark verifies watermark reads and writes.
-func TestSQLiteStore_Watermark(t *testing.T) {
+func TestSQLiteStore_EntityState(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	wm, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
+	es, err := store.GetEntityState(ctx, "sync-a", "hubspot", "id=1")
 	if err != nil {
-		t.Fatalf("GetWatermark() error = %v", err)
+		t.Fatalf("GetEntityState() error = %v", err)
 	}
-	if !wm.IsZero() {
-		t.Fatalf("expected zero watermark, got %v", wm)
-	}
-
-	first := time.Now().UTC().Truncate(time.Second)
-	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", first); err != nil {
-		t.Fatalf("SetWatermark() error = %v", err)
+	if es != nil {
+		t.Fatal("expected nil for unseen entity")
 	}
 
-	got, err := store.GetWatermark(ctx, "pipeline-a", "source-a")
+	want := &EntityState{
+		SyncName:           "sync-a",
+		Destination:        "hubspot",
+		EntityKey:          "id=1",
+		CurrentFingerprint: "abc123",
+		LastDecision:       "upsert",
+		LastStatus:         "ok",
+		Version:            1,
+		UpdatedAt:          time.Now().UTC().Truncate(time.Second),
+	}
+	if err := store.SaveEntityState(ctx, want); err != nil {
+		t.Fatalf("SaveEntityState() error = %v", err)
+	}
+
+	got, err := store.GetEntityState(ctx, "sync-a", "hubspot", "id=1")
 	if err != nil {
-		t.Fatalf("GetWatermark() error = %v", err)
+		t.Fatalf("GetEntityState() after save error = %v", err)
 	}
-	if !got.Equal(first) {
-		t.Fatalf("expected %v, got %v", first, got)
-	}
-
-	second := first.Add(2 * time.Minute)
-	if err := store.SetWatermark(ctx, "pipeline-a", "source-a", second); err != nil {
-		t.Fatalf("SetWatermark() error = %v", err)
+	if got == nil || got.CurrentFingerprint != "abc123" || got.Version != 1 {
+		t.Fatalf("unexpected entity state: %+v", got)
 	}
 
-	got, err = store.GetWatermark(ctx, "pipeline-a", "source-a")
+	states, err := store.ListEntityStates(ctx, "sync-a", "hubspot", 10, 0)
 	if err != nil {
-		t.Fatalf("GetWatermark() error = %v", err)
+		t.Fatalf("ListEntityStates() error = %v", err)
 	}
-	if !got.Equal(second) {
-		t.Fatalf("expected latest watermark %v, got %v", second, got)
+	if len(states) != 1 {
+		t.Fatalf("expected 1 state, got %d", len(states))
+	}
+
+	if err := store.ResetEntityState(ctx, "sync-a", "hubspot", "id=1"); err != nil {
+		t.Fatalf("ResetEntityState() error = %v", err)
+	}
+	es, err = store.GetEntityState(ctx, "sync-a", "hubspot", "id=1")
+	if err != nil {
+		t.Fatalf("GetEntityState() after reset error = %v", err)
+	}
+	if es != nil {
+		t.Fatal("expected nil after reset")
 	}
 }
 
-// TestSQLiteStore_KafkaOffset verifies offset reads and writes.
-func TestSQLiteStore_KafkaOffset(t *testing.T) {
+func TestSQLiteStore_RuleFirings(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	offset, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
+	fired, err := store.HasRuleFired(ctx, "sync-a", "hubspot", "id=1", "welcome-rule")
 	if err != nil {
-		t.Fatalf("GetOffset() error = %v", err)
+		t.Fatalf("HasRuleFired() error = %v", err)
 	}
-	if offset != -1 {
-		t.Fatalf("expected -1 offset, got %d", offset)
-	}
-
-	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 42); err != nil {
-		t.Fatalf("SetOffset() error = %v", err)
+	if fired {
+		t.Fatal("expected rule not fired yet")
 	}
 
-	got, err := store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
+	if err := store.MarkRuleFired(ctx, "sync-a", "hubspot", "id=1", "welcome-rule"); err != nil {
+		t.Fatalf("MarkRuleFired() error = %v", err)
+	}
+
+	fired, err = store.HasRuleFired(ctx, "sync-a", "hubspot", "id=1", "welcome-rule")
 	if err != nil {
-		t.Fatalf("GetOffset() error = %v", err)
+		t.Fatalf("HasRuleFired() after mark error = %v", err)
 	}
-	if got != 42 {
-		t.Fatalf("expected 42, got %d", got)
-	}
-
-	if err := store.SetOffset(ctx, "pipeline-a", "topic-a", 0, 99); err != nil {
-		t.Fatalf("SetOffset() error = %v", err)
-	}
-
-	got, err = store.GetOffset(ctx, "pipeline-a", "topic-a", 0)
-	if err != nil {
-		t.Fatalf("GetOffset() error = %v", err)
-	}
-	if got != 99 {
-		t.Fatalf("expected latest offset 99, got %d", got)
+	if !fired {
+		t.Fatal("expected rule to be marked fired")
 	}
 }
 
-// TestSQLiteStore_RunLog verifies run creation, update, and lookup.
 func TestSQLiteStore_RunLog(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	if _, err := store.GetLastRun(ctx, "pipeline-a"); err == nil {
+	if _, err := store.GetLastRun(ctx, "sync-a"); err == nil {
 		t.Fatal("expected error for empty run log")
 	}
 
-	runID, err := store.StartRun(ctx, "pipeline-a", "batch")
+	runID, err := store.StartRun(ctx, "sync-a", "once")
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 		t.Fatalf("FinishRun() error = %v", err)
 	}
 
-	secondRunID, err := store.StartRun(ctx, "pipeline-a", "batch")
+	secondRunID, err := store.StartRun(ctx, "sync-a", "once")
 	if err != nil {
 		t.Fatalf("StartRun() second error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 		t.Fatalf("expected later run ID, got %d after %d", secondRunID, runID)
 	}
 
-	got, err := store.GetLastRun(ctx, "pipeline-a")
+	got, err := store.GetLastRun(ctx, "sync-a")
 	if err != nil {
 		t.Fatalf("GetLastRun() error = %v", err)
 	}
@@ -144,12 +144,11 @@ func TestSQLiteStore_RunLog(t *testing.T) {
 	}
 }
 
-// TestSQLiteStore_Delivery verifies delivery idempotency tracking.
 func TestSQLiteStore_Delivery(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -157,14 +156,14 @@ func TestSQLiteStore_Delivery(t *testing.T) {
 		t.Fatal("expected row to be undelivered")
 	}
 
-	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "sync-a", "hubspot"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "sync-a", "hubspot"); err != nil {
 		t.Fatalf("MarkDelivered() second call error = %v", err)
 	}
 
-	ok, err = store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-1", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -181,11 +180,11 @@ func TestSQLiteStore_BeginBatch_BuffersWrites(t *testing.T) {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
+		if err := store.MarkDelivered(ctx, "row-1", "sync-a", "hubspot"); err != nil {
 			t.Fatalf("MarkDelivered() error = %v", err)
 		}
 	}
-	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -209,10 +208,10 @@ func TestSQLiteStore_CommitBatch_WritesAll(t *testing.T) {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 100; i++ {
-		if err := store.MarkDelivered(ctx, 
+		if err := store.MarkDelivered(ctx,
 			"row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano),
-			"pipeline-a",
-			"dest-a",
+			"sync-a",
+			"hubspot",
 		); err != nil {
 			t.Fatalf("MarkDelivered() error = %v", err)
 		}
@@ -237,14 +236,14 @@ func TestSQLiteStore_RollbackBatch_DiscardsPending(t *testing.T) {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
 	for i := 0; i < 5; i++ {
-		if err := store.MarkDelivered(ctx, "row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano), "pipeline-a", "dest-a"); err != nil {
+		if err := store.MarkDelivered(ctx, "row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano), "sync-a", "hubspot"); err != nil {
 			t.Fatalf("MarkDelivered() error = %v", err)
 		}
 	}
 	if err := store.RollbackBatch(); err != nil {
 		t.Fatalf("RollbackBatch() error = %v", err)
 	}
-	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -264,30 +263,30 @@ func TestSQLiteStore_IsDelivered_ChecksBoth(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 
-	if err := store.MarkDelivered(ctx, "row-1", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-1", "sync-a", "hubspot"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
 	if err := store.BeginBatch(context.Background()); err != nil {
 		t.Fatalf("BeginBatch() error = %v", err)
 	}
-	if err := store.MarkDelivered(ctx, "row-2", "pipeline-a", "dest-a"); err != nil {
+	if err := store.MarkDelivered(ctx, "row-2", "sync-a", "hubspot"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	ok, err := store.IsDelivered(ctx, "row-1", "pipeline-a", "dest-a")
+	ok, err := store.IsDelivered(ctx, "row-1", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
 	if !ok {
 		t.Fatal("expected committed row to be visible")
 	}
-	ok, err = store.IsDelivered(ctx, "row-2", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-2", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
 	if !ok {
 		t.Fatal("expected pending row to be visible")
 	}
-	ok, err = store.IsDelivered(ctx, "row-3", "pipeline-a", "dest-a")
+	ok, err = store.IsDelivered(ctx, "row-3", "sync-a", "hubspot")
 	if err != nil {
 		t.Fatalf("IsDelivered() error = %v", err)
 	}
@@ -310,10 +309,10 @@ func TestSQLiteStore_BatchConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- store.MarkDelivered(ctx, 
+			errs <- store.MarkDelivered(ctx,
 				"row-"+time.Now().UTC().Add(time.Duration(i)).Format(time.RFC3339Nano),
-				"pipeline-a",
-				"dest-a",
+				"sync-a",
+				"hubspot",
 			)
 		}()
 	}
@@ -336,7 +335,6 @@ func TestSQLiteStore_BatchConcurrent(t *testing.T) {
 	}
 }
 
-// TestSQLiteStore_Concurrent verifies concurrent writes do not race or error.
 func TestSQLiteStore_Concurrent(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
@@ -348,7 +346,14 @@ func TestSQLiteStore_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- store.SetWatermark(ctx, "pipeline-a", "source-"+string(rune('a'+i)), time.Unix(int64(i), 0).UTC())
+			es := &EntityState{
+				SyncName:     "sync-a",
+				Destination:  "hubspot",
+				EntityKey:    "id=" + string(rune('0'+i)),
+				LastDecision: "upsert",
+				UpdatedAt:    time.Now().UTC(),
+			}
+			errs <- store.SaveEntityState(ctx, es)
 		}()
 	}
 	wg.Wait()
@@ -356,7 +361,7 @@ func TestSQLiteStore_Concurrent(t *testing.T) {
 
 	for err := range errs {
 		if err != nil {
-			t.Fatalf("concurrent SetWatermark() error = %v", err)
+			t.Fatalf("concurrent SaveEntityState() error = %v", err)
 		}
 	}
 }

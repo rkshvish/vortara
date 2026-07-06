@@ -172,7 +172,7 @@ func (m *MixpanelDestination) sendBatch(ctx context.Context, rows []row.Row) err
 		records = append(records, map[string]any{
 			"$token":       m.projectToken,
 			"$distinct_id": fmt.Sprintf("%v", rw.Data[m.distinctID]),
-			m.operation:   props,
+			m.operation:    props,
 		})
 	}
 	payload, err := json.Marshal(records)

@@ -27,14 +27,14 @@ const (
 
 // intercomTopFields are Intercom contact top-level fields (not custom attributes).
 var intercomTopFields = map[string]bool{
-	"email":       true,
-	"external_id": true,
-	"role":        true,
-	"name":        true,
-	"phone":       true,
-	"avatar":      true,
-	"signed_up_at": true,
-	"last_seen_at": true,
+	"email":                    true,
+	"external_id":              true,
+	"role":                     true,
+	"name":                     true,
+	"phone":                    true,
+	"avatar":                   true,
+	"signed_up_at":             true,
+	"last_seen_at":             true,
 	"unsubscribed_from_emails": true,
 }
 

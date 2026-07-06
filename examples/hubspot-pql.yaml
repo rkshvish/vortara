@@ -1,0 +1,128 @@
+sync:
+  name: pql-to-hubspot
+  description: "Postgres PQL → HubSpot contacts — upsert on email, stage transitions trigger sequences"
+
+  source:
+    type: postgres
+    url: "${DATABASE_URL}"
+    query: |
+      SELECT
+        id,
+        email,
+        first_name,
+        last_name,
+        company,
+        title,
+        phone,
+        lead_score,
+        lifecycle_stage,
+        trial_started_at,
+        trial_ends_at,
+        paying_since,
+        last_active_at
+      FROM leads
+      WHERE email IS NOT NULL
+    entity_key: email
+    watermark:
+      column: last_active_at
+    batch_size: 100
+
+  required:
+    - email
+
+  mapping:
+    - source: email
+    - source: first_name
+      dest: firstname
+    - source: last_name
+      dest: lastname
+    - source: company
+    - source: title
+    - source: phone
+    - source: lead_score
+      dest: hs_lead_score
+    - source: lifecycle_stage
+      dest: lifecyclestage
+    - source: trial_started_at
+      dest: trial_started_at__c
+    - source: trial_ends_at
+      dest: trial_ends_at__c
+    - source: paying_since
+      dest: paying_since__c
+    - source: last_active_at
+      dest: last_active_at__c
+      exclude_from_fingerprint: true
+
+  state:
+    backend: sqlite
+    path: ./state/pql-to-hubspot.db
+    fingerprint:
+      exclude:
+        - last_active_at__c
+
+  decisions:
+    default: skip
+    rules:
+      - name: new-contact
+        when: first_seen()
+        action: create
+        remember:
+          first_seen_at: now()
+
+      - name: trial-started
+        when:
+          transitioned:
+            field: lifecyclestage
+            from: lead
+            to: marketingqualifiedlead
+        once: true
+        action: update
+        remember:
+          became_mql_at: now()
+
+      - name: became-customer
+        when:
+          transitioned:
+            field: lifecyclestage
+            from: salesqualifiedlead
+            to: customer
+        once: true
+        action: update
+        remember:
+          became_customer_at: now()
+
+      - name: data-changed
+        when:
+          fingerprint_changed: {}
+        action: update
+
+  on_missing_from_source:
+    action: skip
+    after_missing_runs: 10
+
+  destination:
+    type: hubspot
+    auth:
+      type: bearer
+      token: "${HUBSPOT_ACCESS_TOKEN}"
+    object: contacts
+    match_on:
+      - email
+
+  safety:
+    max_creates_per_run: 200
+    max_updates_per_run: 500
+
+  errors:
+    on_error: skip
+    dlq:
+      path: ./dlq/pql-to-hubspot.dlq.jsonl
+      on_status: [429, 500, 502, 503]
+    retry:
+      on_status: [429, 500, 502, 503]
+      attempts: 3
+      backoff: exponential
+      initial_delay: 2s
+      max_delay: 60s
+
+  cron: "*/15 * * * *"
