@@ -16,6 +16,7 @@ import (
 type Engine struct {
 	store        state.StateStore
 	destOverride destination.Destination // set in dry-run mode
+	dryRun       bool                    // true when destOverride is a dry-run destination
 	running      atomic.Bool
 	shutdownCh   chan struct{}
 	doneCh       chan struct{}
@@ -55,9 +56,12 @@ func (e *Engine) Store() state.StateStore {
 	return e.store
 }
 
-// SetDryRunDestination installs a destination override (e.g. print-only) for dry-run mode.
+// SetDryRunDestination installs a destination override for dry-run mode.
+// In dry-run mode the engine never writes entity state, marks rules as fired,
+// or records delivery idempotency — all state reads still use the real store.
 func (e *Engine) SetDryRunDestination(dest destination.Destination) {
 	e.destOverride = dest
+	e.dryRun = true
 }
 
 // Shutdown signals shutdown and waits for in-flight work to stop.

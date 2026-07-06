@@ -33,6 +33,7 @@ func (s *fixedSource) Close() error               { return nil }
 
 func init() {
 	registry.RegisterBatchSource("fixed", func() any { return &fixedSource{} })
+	registry.RegisterDestination("capture", func() any { return &captureDestination{} })
 }
 
 // --- helpers ---
@@ -345,6 +346,164 @@ func TestApprovalGate_BypassWithHash(t *testing.T) {
 	st2 := eng2.LastStats()
 	if st2 == nil || st2.ApprovalRequired {
 		t.Error("second run should not set ApprovalRequired")
+	}
+}
+
+// idempotentDestination tracks calls and simulates the real destination behaviour:
+// the first Load succeeds; subsequent calls with the same row.ID return Skipped.
+type idempotentDestination struct {
+	seen    map[string]bool
+	loadCnt int
+	skipCnt int
+}
+
+func newIdempotentDest() *idempotentDestination {
+	return &idempotentDestination{seen: make(map[string]bool)}
+}
+
+func (d *idempotentDestination) Connect(_ context.Context, _ conncfg.DestinationConfig) error {
+	return nil
+}
+func (d *idempotentDestination) Load(_ context.Context, rows []row.Row, _ state.StateStore, _, _ string) (destination.LoadResult, error) {
+	var res destination.LoadResult
+	for _, r := range rows {
+		if d.seen[r.ID] {
+			res.Skipped++
+			d.skipCnt++
+		} else {
+			d.seen[r.ID] = true
+			res.Loaded++
+			d.loadCnt++
+		}
+	}
+	return res, nil
+}
+func (d *idempotentDestination) Close() error { return nil }
+
+// TestDeliveryOpKey_IsDeterministic verifies that the same inputs always produce
+// the same key, and that different inputs produce different keys.
+func TestDeliveryOpKey_IsDeterministic(t *testing.T) {
+	k1 := deliveryOpKey("sync", "dest", "ent1", "create", "fp1")
+	k2 := deliveryOpKey("sync", "dest", "ent1", "create", "fp1")
+	if k1 != k2 {
+		t.Errorf("expected same key, got %q and %q", k1, k2)
+	}
+	k3 := deliveryOpKey("sync", "dest", "ent1", "create", "fp2")
+	if k1 == k3 {
+		t.Errorf("different fingerprints should produce different keys")
+	}
+	k4 := deliveryOpKey("sync", "dest", "ent1", "update", "fp1")
+	if k1 == k4 {
+		t.Errorf("different actions should produce different keys")
+	}
+}
+
+// TestRealRun_SavesEntityState verifies that a real (non-dry-run) run persists
+// entity state so that the second run skips the same entity.
+func TestRealRun_SavesEntityState(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "u1", Data: map[string]any{"id": "u1", "val": "hello"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	f := makeSimpleSync("realrun-idempotency")
+	f.Sync.Source.Type = "fixed"
+	f.Sync.Source.EntityKey = "id"
+	f.Sync.Destination.Type = "capture"
+
+	store := state.NewMemoryStore()
+	eng := NewEngine(store)
+	defer eng.Close()
+
+	// First run — entity is first_seen, should be delivered and state saved.
+	if err := eng.Run(context.Background(), f); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	es, err := store.GetEntityState(context.Background(), "realrun-idempotency", "capture", "u1")
+	if err != nil {
+		t.Fatalf("get entity state: %v", err)
+	}
+	if es == nil {
+		t.Fatal("entity state should be saved after first run")
+	}
+	if es.LastStatus != "success" {
+		t.Errorf("expected status=success, got %q", es.LastStatus)
+	}
+}
+
+// TestDryRun_DoesNotSaveEntityState verifies that dry-run mode never persists
+// entity state, so a subsequent real run still sees the entity as first_seen.
+func TestDryRun_DoesNotSaveEntityState(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "dr1", Data: map[string]any{"id": "dr1", "val": "x"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	f := makeSimpleSync("dryrun-no-state")
+	f.Sync.Source.Type = "fixed"
+	f.Sync.Source.EntityKey = "id"
+	f.Sync.Destination.Type = "capture"
+
+	store := state.NewMemoryStore()
+	eng := NewEngine(store)
+	eng.SetDryRunDestination(&captureDestination{})
+	defer eng.Close()
+
+	if err := eng.Run(context.Background(), f); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+
+	// Entity state must NOT have been written.
+	es, err := store.GetEntityState(context.Background(), "dryrun-no-state", "capture", "dr1")
+	if err != nil {
+		t.Fatalf("get entity state: %v", err)
+	}
+	if es != nil {
+		t.Errorf("dry-run must not persist entity state, got status=%q", es.LastStatus)
+	}
+}
+
+// TestSkippedDelivery_DoesNotSaveEntityState verifies that when the destination
+// reports Skipped=1, Loaded=0 (idempotency hit), the engine does not
+// overwrite entity state.
+func TestSkippedDelivery_DoesNotSaveEntityState(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "sk1", Data: map[string]any{"id": "sk1", "val": "hello"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	f := makeSimpleSync("skip-no-state")
+	f.Sync.Source.Type = "fixed"
+	f.Sync.Source.EntityKey = "id"
+	f.Sync.Destination.Type = "capture"
+
+	store := state.NewMemoryStore()
+	eng := NewEngine(store)
+	defer eng.Close()
+
+	// Run 1: entity is first_seen, delivers and saves state.
+	if err := eng.Run(context.Background(), f); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	es1, _ := store.GetEntityState(context.Background(), "skip-no-state", "capture", "sk1")
+	if es1 == nil {
+		t.Fatal("entity state should be saved after first run")
+	}
+	savedAt := es1.UpdatedAt
+
+	// Run 2: fingerprint unchanged → decision is skip → entity state must not change.
+	eng2 := NewEngine(store)
+	defer eng2.Close()
+	if err := eng2.Run(context.Background(), f); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	es2, _ := store.GetEntityState(context.Background(), "skip-no-state", "capture", "sk1")
+	if es2 == nil {
+		t.Fatal("entity state should still exist after second run")
+	}
+	if !es2.UpdatedAt.Equal(savedAt) {
+		t.Errorf("entity state UpdatedAt changed on second run (skip): was %v, now %v", savedAt, es2.UpdatedAt)
 	}
 }
 

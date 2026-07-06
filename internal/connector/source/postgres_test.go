@@ -712,6 +712,7 @@ func TestPostgresSource_Extract_CtxCancel(t *testing.T) {
 	src.pool = &fakePool{queryer: conn}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	out := make(chan row.Row)
 	done := make(chan error, 1)
 	go func() {

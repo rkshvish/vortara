@@ -358,9 +358,14 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 			continue
 		}
 
+		// Build a deterministic idempotency key that is stable for the same
+		// entity+action+fingerprint, so real-run retries are safe and dry-runs
+		// never pollute the delivery log of a later real run.
+		opKey := deliveryOpKey(s.Name, destName, pd.entityKey, string(pd.plan.Action), pd.curFP)
+
 		if dest != nil {
 			deliveryRow := row.Row{
-				ID:         pd.r.ID,
+				ID:         opKey,
 				PrimaryKey: pd.entityKey,
 				Data:       pd.mapped,
 				Watermark:  pd.r.Watermark,
@@ -375,10 +380,17 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 				} else if firstErr == nil && strings.ToLower(s.Errors.OnError) != "skip" {
 					firstErr = loadErr
 				}
-				_ = e.store.SaveEntityState(ctx, buildEntityState(
-					s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
-					pd.prevPayload, pd.mapped, pd.es, pd.plan, "failed",
-				))
+				if !e.dryRun {
+					_ = e.store.SaveEntityState(ctx, buildEntityState(
+						s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
+						pd.prevPayload, pd.mapped, pd.es, pd.plan, "failed",
+					))
+				}
+				continue
+			}
+			// Destination reported the row as already delivered (idempotency skip).
+			// Do not overwrite entity state — it was already saved on the prior run.
+			if res.Loaded == 0 && res.Skipped > 0 && len(res.Errors) == 0 {
 				continue
 			}
 			for _, re := range res.Errors {
@@ -391,17 +403,30 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 			stats.RowsLoaded++
 		}
 
-		destID := ""
-		if pd.es != nil {
-			destID = pd.es.DestinationID
-		}
-		newState := buildEntityState(
-			s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
-			pd.prevPayload, pd.mapped, pd.es, pd.plan, "success",
-		)
-		newState.DestinationID = destID
-		if err := e.store.SaveEntityState(ctx, newState); err != nil {
-			l.Warn("save entity state failed", slog.String("entity", pd.entityKey), slog.String("error", err.Error()))
+		// Persist entity state and rule firings only for real (non-dry-run) runs.
+		// Dry-run reads real state but must never write it, so subsequent real runs
+		// see the correct baseline and are not skipped by stale fingerprints.
+		if !e.dryRun {
+			destID := ""
+			if pd.es != nil {
+				destID = pd.es.DestinationID
+			}
+			newState := buildEntityState(
+				s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
+				pd.prevPayload, pd.mapped, pd.es, pd.plan, "success",
+			)
+			newState.DestinationID = destID
+			if err := e.store.SaveEntityState(ctx, newState); err != nil {
+				l.Warn("save entity state failed", slog.String("entity", pd.entityKey), slog.String("error", err.Error()))
+			}
+
+			for _, ruleName := range pd.plan.TriggeredRules {
+				for _, rc := range s.Decisions.Rules {
+					if rc.Name == ruleName && rc.Once {
+						_ = e.store.MarkRuleFired(ctx, s.Name, destName, pd.entityKey, ruleName)
+					}
+				}
+			}
 		}
 
 		// Record artifact sample (redacting masked fields before storing).
@@ -410,14 +435,6 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 			art.RecordCreate(pd.entityKey, sampleData)
 		} else {
 			art.RecordUpdate(pd.entityKey, sampleData, pd.changedFields)
-		}
-
-		for _, ruleName := range pd.plan.TriggeredRules {
-			for _, rc := range s.Decisions.Rules {
-				if rc.Name == ruleName && rc.Once {
-					_ = e.store.MarkRuleFired(ctx, s.Name, destName, pd.entityKey, ruleName)
-				}
-			}
 		}
 
 		safetyEval.Record(string(pd.plan.Action), &counts)
@@ -699,6 +716,19 @@ func buildEntityState(
 // computeApprovalHash returns a short deterministic hash for an approval snapshot.
 // The hash encodes the sync name, destination, and pending action counts so the
 // operator can verify what they're approving.
+// deliveryOpKey builds a stable, content-addressed idempotency key for a single
+// planned delivery. The key encodes every dimension that distinguishes one
+// operation from another: the sync, the destination, the entity, the action,
+// and the content fingerprint. It is deterministic across runs so that:
+//   - a real run that retries after a transient error recognises the previous
+//     successful delivery and skips re-sending to the destination;
+//   - a dry-run cannot "use up" the key that a later real run needs.
+func deliveryOpKey(syncName, destName, entityKey, action, fingerprint string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s:%s:%s:%s:%s", syncName, destName, entityKey, action, fingerprint)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func computeApprovalHash(syncName, destName string, counts safety.RunCounts) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s:%s:c=%d:u=%d:d=%d", syncName, destName, counts.Creates, counts.Updates, counts.Deletes)
