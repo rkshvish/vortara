@@ -16,7 +16,10 @@ import (
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
 
-var runForceUnlock bool
+var (
+	runForceUnlock   bool
+	runApproveHash   string
+)
 
 var runCmd = &cobra.Command{
 	Use:   "run <sync.yaml>",
@@ -27,6 +30,7 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.Flags().BoolVar(&runForceUnlock, "force-unlock", false, "Clear a stale pipeline lock before running")
+	runCmd.Flags().StringVar(&runApproveHash, "approve-snapshot", "", "Approval hash from a previous dry-run to bypass the approval gate")
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -53,6 +57,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	eng := engine.NewEngine(store)
+	if runApproveHash != "" {
+		eng.SetApprovalHash(runApproveHash)
+	}
 	defer eng.Close()
 
 	baseCtx := vlogger.WithContext(

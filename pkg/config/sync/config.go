@@ -26,6 +26,7 @@ type SyncSpec struct {
 	Safety        SafetyConfig      `yaml:"safety,omitempty"`
 	Errors        ErrorsConfig      `yaml:"errors,omitempty"`
 	Artifacts     ArtifactsConfig   `yaml:"artifacts,omitempty"`
+	Metrics       MetricsConfig     `yaml:"metrics,omitempty"`
 	Cron          string            `yaml:"cron,omitempty"`
 	Tests         []TestCase        `yaml:"tests,omitempty"`
 }
@@ -34,6 +35,11 @@ type SyncSpec struct {
 type ArtifactsConfig struct {
 	Path       string `yaml:"path,omitempty"`        // base directory for artifact files
 	MaxSamples int    `yaml:"max_samples,omitempty"` // max sample rows per category (default 10)
+}
+
+// MetricsConfig controls Prometheus textfile output (node_exporter compatible).
+type MetricsConfig struct {
+	Path string `yaml:"path,omitempty"` // directory where .prom files are written
 }
 
 // SourceConfig describes where to read entity data from.

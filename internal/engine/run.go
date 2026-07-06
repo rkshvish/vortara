@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +20,7 @@ import (
 	"github.com/rkshvish/vortara/internal/diff"
 	"github.com/rkshvish/vortara/internal/fingerprint"
 	vlogger "github.com/rkshvish/vortara/internal/logger"
+	"github.com/rkshvish/vortara/internal/metrics"
 	"github.com/rkshvish/vortara/internal/registry"
 	"github.com/rkshvish/vortara/internal/safety"
 	"github.com/rkshvish/vortara/internal/state"
@@ -82,6 +85,8 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 	e.running.Store(true)
 	defer e.running.Store(false)
 
+	runStart := time.Now()
+
 	// --- open destination ---
 	dest, destName, err := e.openDest(ctx, s)
 	if err != nil {
@@ -125,6 +130,14 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 	defer func() {
 		_ = art.Flush(stats.Status)
 		_ = e.store.FinishRun(context.WithoutCancel(ctx), runID, stats)
+		statsCopy := stats
+		e.statsMu.Lock()
+		e.lastStats = &statsCopy
+		e.statsMu.Unlock()
+		if s.Metrics.Path != "" {
+			rec := metrics.New(s.Metrics.Path)
+			_ = rec.RecordRun(s.Name, statsCopy, time.Since(runStart))
+		}
 	}()
 
 	if err := e.store.BeginBatch(ctx); err != nil {
@@ -153,6 +166,19 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 	// seenKeys tracks which entity keys appeared in this extraction pass
 	seenKeys := make(map[string]struct{})
 
+	// --- load high watermark from last successful run (incremental extraction) ---
+	var prevWatermark time.Time
+	if s.Source.Watermark != nil {
+		if hist, err := e.store.GetRunHistory(ctx, s.Name, 10); err == nil {
+			for _, run := range hist {
+				if run.Status == "success" && !run.HighWatermark.IsZero() {
+					prevWatermark = run.HighWatermark
+					break
+				}
+			}
+		}
+	}
+
 	// =========================================================
 	// Phase 1: Decision pass — extract rows, evaluate decisions,
 	// buffer non-skip results. No delivery happens here.
@@ -160,17 +186,21 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 	extractCh := make(chan row.Row, 256)
 	extractDone := make(chan error, 1)
 	go func() {
-		extractDone <- src.Extract(ctx, time.Time{}, time.Time{}, extractCh)
+		extractDone <- src.Extract(ctx, prevWatermark, time.Time{}, extractCh)
 	}()
 
 	var pending []pendingDelivery
 	fieldChangeCounts := make(map[string]int)
+	var maxWatermark time.Time
 
 	for r := range extractCh {
 		if ctx.Err() != nil {
 			break
 		}
 		stats.RowsExtracted++
+		if !r.Watermark.IsZero() && r.Watermark.After(maxWatermark) {
+			maxWatermark = r.Watermark
+		}
 
 		if missing := missingRequiredFields(r.Data, s.Required); len(missing) > 0 {
 			l.Warn("required fields missing, skipping row",
@@ -268,6 +298,10 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 
 	extractErr := <-extractDone
 
+	// Persist watermark and field-change breakdown from Phase 1.
+	stats.HighWatermark = maxWatermark
+	stats.FieldChangeCounts = fieldChangeCounts
+
 	// =========================================================
 	// Safety: field-ratio check before any delivery begins.
 	// If violated, rollback and return — no records delivered.
@@ -277,6 +311,31 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 		stats.Status = "failed"
 		stats.Error = ratioErr.Error()
 		return ratioErr
+	}
+
+	// =========================================================
+	// Safety: approval check — block if require_approval_above or
+	// require_approval_for is triggered. Operator can bypass by
+	// re-running with --approve-snapshot <hash>.
+	// =========================================================
+	var pendingCounts safety.RunCounts
+	for _, pd := range pending {
+		safetyEval.Record(string(pd.plan.Action), &pendingCounts)
+	}
+	if approvalNeeded, reason := safetyEval.ApprovalRequired(pendingCounts); approvalNeeded {
+		hash := computeApprovalHash(s.Name, destName, pendingCounts)
+		e.statsMu.RLock()
+		provided := e.approvalHash
+		e.statsMu.RUnlock()
+		if provided != hash {
+			_ = e.store.RollbackBatch()
+			stats.Status = "failed"
+			stats.ApprovalRequired = true
+			stats.ApprovalHash = hash
+			stats.Error = fmt.Sprintf("approval required: %s — re-run with --approve-snapshot %s", reason, hash)
+			return fmt.Errorf("%s", stats.Error)
+		}
+		l.Info("approval gate bypassed", slog.String("hash", hash))
 	}
 
 	// =========================================================
@@ -363,6 +422,11 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 
 		safetyEval.Record(string(pd.plan.Action), &counts)
 	}
+
+	// Persist Phase 2 delivery breakdown.
+	stats.Creates = counts.Creates
+	stats.Updates = counts.Updates
+	stats.Deletes = counts.Deletes
 
 	// --- process entities missing from this extraction pass ---
 	if s.OnMissingFrom.Action != "" && ctx.Err() == nil {
@@ -627,6 +691,15 @@ func buildEntityState(
 		LastStatus:          status,
 		Version:             version,
 	}
+}
+
+// computeApprovalHash returns a short deterministic hash for an approval snapshot.
+// The hash encodes the sync name, destination, and pending action counts so the
+// operator can verify what they're approving.
+func computeApprovalHash(syncName, destName string, counts safety.RunCounts) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s:%s:c=%d:u=%d:d=%d", syncName, destName, counts.Creates, counts.Updates, counts.Deletes)
+	return "appr-" + hex.EncodeToString(h.Sum(nil))[:8]
 }
 
 // openDest opens the destination connector from config.

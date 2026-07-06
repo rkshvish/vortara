@@ -179,6 +179,7 @@ func (s *MemoryStore) FinishRun(_ context.Context, runID int64, stats RunStats) 
 	run.RowsLoaded = stats.RowsLoaded
 	run.RowsSkipped = stats.RowsSkipped
 	run.RowsErrored = stats.RowsErrored
+	run.HighWatermark = stats.HighWatermark
 	run.Status = stats.Status
 	run.Error = stats.Error
 	s.runs[runID] = run

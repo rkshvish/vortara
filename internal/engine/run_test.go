@@ -2,15 +2,38 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rkshvish/vortara/internal/connector/destination"
+	"github.com/rkshvish/vortara/internal/registry"
 	"github.com/rkshvish/vortara/internal/state"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 	"github.com/rkshvish/vortara/pkg/row"
 )
+
+// --- fixed in-memory batch source for engine tests ---
+
+var testSourceRows []row.Row
+
+type fixedSource struct{}
+
+func (s *fixedSource) Connect(_ context.Context, _ conncfg.SourceConfig) error { return nil }
+func (s *fixedSource) Extract(_ context.Context, _ time.Time, _ time.Time, out chan<- row.Row) error {
+	for _, r := range testSourceRows {
+		out <- r
+	}
+	close(out)
+	return nil
+}
+func (s *fixedSource) GetWatermarkColumn() string { return "" }
+func (s *fixedSource) Close() error               { return nil }
+
+func init() {
+	registry.RegisterBatchSource("fixed", func() any { return &fixedSource{} })
+}
 
 // --- helpers ---
 
@@ -235,5 +258,126 @@ func TestPipelineLock_BlocksConcurrentRun(t *testing.T) {
 	// Lock should be released after run completes. We verify by locking manually.
 	if err := store.LockRun(context.Background(), "lock-test", "manual", 1*time.Minute); err != nil {
 		t.Fatalf("lock should be free after run: %v", err)
+	}
+}
+
+func TestApprovalGate_BlocksDelivery(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "1", Data: map[string]any{"id": "1", "name": "Alice"}},
+		{ID: "2", Data: map[string]any{"id": "2", "name": "Bob"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	f := makeSimpleSync("approval-block-test")
+	f.Sync.Source.Type = "fixed"
+	f.Sync.Source.EntityKey = "id"
+	f.Sync.Safety.RequireApprovalFor = []string{"create"}
+
+	store := state.NewMemoryStore()
+	eng := NewEngine(store)
+	eng.SetDryRunDestination(&captureDestination{})
+	defer eng.Close()
+
+	err := eng.Run(context.Background(), f)
+	if err == nil {
+		t.Fatal("expected approval error, got nil")
+	}
+	if !strings.Contains(err.Error(), "approval required") {
+		t.Fatalf("expected 'approval required' in error, got: %v", err)
+	}
+
+	st := eng.LastStats()
+	if st == nil {
+		t.Fatal("expected LastStats to be set after blocked run")
+	}
+	if !st.ApprovalRequired {
+		t.Error("expected ApprovalRequired=true")
+	}
+	if st.ApprovalHash == "" {
+		t.Error("expected non-empty ApprovalHash")
+	}
+	if !strings.HasPrefix(st.ApprovalHash, "appr-") {
+		t.Errorf("expected hash to start with 'appr-', got %q", st.ApprovalHash)
+	}
+}
+
+func TestApprovalGate_BypassWithHash(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "1", Data: map[string]any{"id": "1", "name": "Alice"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	makeSyncF := func(name string) *synccfg.SyncFile {
+		f := makeSimpleSync(name)
+		f.Sync.Source.Type = "fixed"
+		f.Sync.Source.EntityKey = "id"
+		f.Sync.Safety.RequireApprovalFor = []string{"create"}
+		return f
+	}
+
+	// Run 1: get the approval hash.
+	f := makeSyncF("approval-bypass-test")
+	store1 := state.NewMemoryStore()
+	eng1 := NewEngine(store1)
+	eng1.SetDryRunDestination(&captureDestination{})
+	defer eng1.Close()
+
+	if err := eng1.Run(context.Background(), f); err == nil {
+		t.Fatal("first run should require approval")
+	}
+	st1 := eng1.LastStats()
+	if st1 == nil || st1.ApprovalHash == "" {
+		t.Fatal("expected ApprovalHash from first run")
+	}
+	hash := st1.ApprovalHash
+
+	// Run 2: provide the hash, should succeed.
+	f2 := makeSyncF("approval-bypass-test")
+	store2 := state.NewMemoryStore()
+	eng2 := NewEngine(store2)
+	eng2.SetDryRunDestination(&captureDestination{})
+	eng2.SetApprovalHash(hash)
+	defer eng2.Close()
+
+	if err := eng2.Run(context.Background(), f2); err != nil {
+		t.Fatalf("approved run should succeed, got: %v", err)
+	}
+	st2 := eng2.LastStats()
+	if st2 == nil || st2.ApprovalRequired {
+		t.Error("second run should not set ApprovalRequired")
+	}
+}
+
+func TestLastStats_PopulatedAfterRun(t *testing.T) {
+	testSourceRows = []row.Row{
+		{ID: "1", Data: map[string]any{"id": "1", "val": "x"}},
+		{ID: "2", Data: map[string]any{"id": "2", "val": "y"}},
+	}
+	defer func() { testSourceRows = nil }()
+
+	f := makeSimpleSync("laststats-test")
+	f.Sync.Source.Type = "fixed"
+	f.Sync.Source.EntityKey = "id"
+
+	store := state.NewMemoryStore()
+	eng := NewEngine(store)
+	eng.SetDryRunDestination(&captureDestination{})
+	defer eng.Close()
+
+	if err := eng.Run(context.Background(), f); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	st := eng.LastStats()
+	if st == nil {
+		t.Fatal("LastStats should not be nil after successful run")
+	}
+	if st.RowsExtracted != 2 {
+		t.Errorf("expected RowsExtracted=2, got %d", st.RowsExtracted)
+	}
+	if st.Creates != 2 {
+		t.Errorf("expected Creates=2, got %d", st.Creates)
+	}
+	if st.Status != "success" {
+		t.Errorf("expected status=success, got %q", st.Status)
 	}
 }

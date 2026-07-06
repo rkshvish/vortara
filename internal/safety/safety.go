@@ -3,6 +3,7 @@ package safety
 
 import (
 	"fmt"
+	"strings"
 
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
@@ -59,6 +60,32 @@ func (e *Evaluator) CheckFieldRatios(fieldChangeCounts map[string]int, totalEnti
 		}
 	}
 	return nil
+}
+
+// ApprovalRequired returns (true, reason) if the pending counts exceed any configured approval threshold.
+// The caller should compute a snapshot hash and block delivery unless the operator has pre-approved it.
+func (e *Evaluator) ApprovalRequired(counts RunCounts) (bool, string) {
+	total := counts.Creates + counts.Updates + counts.Deletes
+	if e.cfg.RequireApprovalAbove > 0 && float64(total) > e.cfg.RequireApprovalAbove {
+		return true, fmt.Sprintf("total deliveries (%d) exceeds require_approval_above (%.0f)", total, e.cfg.RequireApprovalAbove)
+	}
+	for _, action := range e.cfg.RequireApprovalFor {
+		switch strings.ToLower(action) {
+		case "delete":
+			if counts.Deletes > 0 {
+				return true, fmt.Sprintf("approval required for delete action (%d deletes)", counts.Deletes)
+			}
+		case "create":
+			if counts.Creates > 0 {
+				return true, fmt.Sprintf("approval required for create action (%d creates)", counts.Creates)
+			}
+		case "update":
+			if counts.Updates > 0 {
+				return true, fmt.Sprintf("approval required for update action (%d updates)", counts.Updates)
+			}
+		}
+	}
+	return false, ""
 }
 
 // Record increments the appropriate counter after an action succeeds.
