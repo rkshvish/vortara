@@ -454,6 +454,9 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 		stats.Status = "failed"
 		stats.Error = firstErr.Error()
 	}
+	if s.Errors.FailureWebhookURL != "" && firstErr != nil {
+		sendFailureAlert(context.WithoutCancel(ctx), s.Name, s.Errors.FailureWebhookURL, firstErr)
+	}
 	return firstErr
 }
 

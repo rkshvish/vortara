@@ -44,14 +44,14 @@ type MetricsConfig struct {
 
 // SourceConfig describes where to read entity data from.
 type SourceConfig struct {
-	Type      string          `yaml:"type"`
-	URL       string          `yaml:"url,omitempty"`
-	Table     string          `yaml:"table,omitempty"`
-	Query     string          `yaml:"query,omitempty"`
-	EntityKey string          `yaml:"entity_key"`
+	Type      string           `yaml:"type"`
+	URL       string           `yaml:"url,omitempty"`
+	Table     string           `yaml:"table,omitempty"`
+	Query     string           `yaml:"query,omitempty"`
+	EntityKey string           `yaml:"entity_key"`
 	Watermark *WatermarkConfig `yaml:"watermark,omitempty"`
-	BatchSize int             `yaml:"batch_size,omitempty"`
-	Auth      *AuthConfig     `yaml:"auth,omitempty"`
+	BatchSize int              `yaml:"batch_size,omitempty"`
+	Auth      *AuthConfig      `yaml:"auth,omitempty"`
 }
 
 // WatermarkConfig enables incremental extraction instead of full snapshots.
@@ -178,8 +178,8 @@ type TransitionedConfig struct {
 
 // OnMissingConfig controls behavior for entities absent from the current source snapshot.
 type OnMissingConfig struct {
-	Action           string   `yaml:"action,omitempty"`           // "skip" | "clear_fields" | "delete"
-	Fields           []string `yaml:"fields,omitempty"`           // for clear_fields
+	Action           string   `yaml:"action,omitempty"`             // "skip" | "clear_fields" | "delete"
+	Fields           []string `yaml:"fields,omitempty"`             // for clear_fields
 	AfterMissingRuns int      `yaml:"after_missing_runs,omitempty"` // default 1
 }
 
@@ -211,11 +211,12 @@ type DLQErrorConfig struct {
 
 // ErrorsConfig defines error handling policy.
 type ErrorsConfig struct {
-	OnError    string         `yaml:"on_error,omitempty"`    // "skip" | "retry" | "dlq"
-	MaxRetries int            `yaml:"max_retries,omitempty"` // deprecated: use retry.attempts
-	DLQPath    string         `yaml:"dlq_path,omitempty"`    // deprecated: use dlq.path
-	Retry      RetryConfig    `yaml:"retry,omitempty"`
-	DLQ        DLQErrorConfig `yaml:"dlq,omitempty"`
+	OnError           string         `yaml:"on_error,omitempty"`            // "skip" | "retry" | "dlq"
+	MaxRetries        int            `yaml:"max_retries,omitempty"`         // deprecated: use retry.attempts
+	DLQPath           string         `yaml:"dlq_path,omitempty"`            // deprecated: use dlq.path
+	FailureWebhookURL string         `yaml:"failure_webhook_url,omitempty"` // POST JSON on run failure
+	Retry             RetryConfig    `yaml:"retry,omitempty"`
+	DLQ               DLQErrorConfig `yaml:"dlq,omitempty"`
 }
 
 // TestCase defines an inline state unit test for the sync (run via vortara test --state-tests).
