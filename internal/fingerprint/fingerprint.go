@@ -4,73 +4,104 @@
 package fingerprint
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Of returns a hex-encoded SHA-256 fingerprint of the given map.
+// Top-level fields listed in exclude are omitted before hashing.
 // Keys in nested maps are recursively sorted for stability.
-// Fields listed in exclude are omitted before hashing.
 func Of(data map[string]any, exclude ...string) string {
 	excl := make(map[string]bool, len(exclude))
 	for _, k := range exclude {
 		excl[k] = true
 	}
-	canonical := canonical(data, excl)
-	b, _ := json.Marshal(canonical)
-	sum := sha256.Sum256(b)
+	var buf bytes.Buffer
+	writeCanonical(&buf, data, excl, true)
+	sum := sha256.Sum256(buf.Bytes())
 	return fmt.Sprintf("%x", sum)
 }
 
-// canonical returns a sorted representation of the map suitable for
-// deterministic JSON marshalling.
-func canonical(v any, exclude map[string]bool) any {
+// writeCanonical writes a deterministic JSON encoding of v into buf.
+// When topLevel is true and v is a map, keys present in excl are skipped.
+func writeCanonical(buf *bytes.Buffer, v any, excl map[string]bool, topLevel bool) {
 	switch val := v.(type) {
 	case map[string]any:
 		keys := make([]string, 0, len(val))
 		for k := range val {
-			if !exclude[k] {
-				keys = append(keys, k)
+			if topLevel && excl[k] {
+				continue
 			}
+			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		out := make([]keyVal, 0, len(keys))
-		for _, k := range keys {
-			out = append(out, keyVal{K: k, V: canonical(val[k], nil)})
+		buf.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			kb, _ := json.Marshal(k)
+			buf.Write(kb)
+			buf.WriteByte(':')
+			writeCanonical(buf, val[k], excl, false)
 		}
-		return out
+		buf.WriteByte('}')
 	case []any:
-		out := make([]any, len(val))
+		buf.WriteByte('[')
 		for i, item := range val {
-			out[i] = canonical(item, nil)
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			writeCanonical(buf, item, excl, false)
 		}
-		return out
+		buf.WriteByte(']')
 	default:
-		return val
+		b, _ := json.Marshal(val)
+		buf.Write(b)
 	}
-}
-
-// keyVal is a JSON-marshalable key-value pair that preserves sort order.
-type keyVal struct {
-	K string
-	V any
-}
-
-func (kv keyVal) MarshalJSON() ([]byte, error) {
-	k, err := json.Marshal(kv.K)
-	if err != nil {
-		return nil, err
-	}
-	v, err := json.Marshal(kv.V)
-	if err != nil {
-		return nil, err
-	}
-	return append(append(append(k, ':'), v...), 0)[:len(k)+1+len(v)], nil
 }
 
 // Changed returns true if a and b produce different fingerprints.
 func Changed(a, b map[string]any, exclude ...string) bool {
 	return Of(a, exclude...) != Of(b, exclude...)
+}
+
+// NormalizePayload converts a mapped payload to a canonical, JSON-serialisable
+// form before fingerprinting, diffing, or persisting. Currently it:
+//   - converts time.Time → UTC RFC3339 string, eliminating cosmetic differences
+//     between "2026-07-01T10:00:00Z" and "2026-07-01 10:00:00 +0000 UTC"
+//   - recurses into nested map[string]any and []any
+//   - preserves strings, numbers, booleans, and nil unchanged
+func NormalizePayload(data map[string]any) map[string]any {
+	out := make(map[string]any, len(data))
+	for k, v := range data {
+		out[k] = normalizeValue(v)
+	}
+	return out
+}
+
+func normalizeValue(v any) any {
+	switch val := v.(type) {
+	case time.Time:
+		return val.UTC().Format(time.RFC3339)
+	case *time.Time:
+		if val == nil {
+			return nil
+		}
+		return val.UTC().Format(time.RFC3339)
+	case map[string]any:
+		return NormalizePayload(val)
+	case []any:
+		out := make([]any, len(val))
+		for i, item := range val {
+			out[i] = normalizeValue(item)
+		}
+		return out
+	default:
+		return v
+	}
 }

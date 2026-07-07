@@ -212,7 +212,7 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 			continue
 		}
 
-		mapped := applyMapping(r.Data, s.Mapping)
+		mapped := fingerprint.NormalizePayload(applyMapping(r.Data, s.Mapping))
 		entityKey := fmt.Sprintf("%v", r.Data[s.Source.EntityKey])
 		if entityKey == "" || entityKey == "<nil>" {
 			l.Warn("entity_key missing, skipping row",
@@ -398,6 +398,18 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 				if dlq.Enabled() {
 					_ = dlq.Write(deliveryRow, pd.entityKey, re.Err)
 				}
+				// Mark the entity as failed so state inspect and explain show the
+				// failure. This mirrors the top-level loadErr path above.
+				if !e.dryRun {
+					_ = e.store.SaveEntityState(ctx, buildEntityState(
+						s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
+						pd.prevPayload, pd.mapped, pd.es, pd.plan, "failed",
+					))
+				}
+			}
+			// If all rows errored, skip the success state write below.
+			if len(res.Errors) > 0 && res.Loaded == 0 {
+				continue
 			}
 		} else {
 			stats.RowsLoaded++

@@ -127,7 +127,7 @@ func runDiff(_ *cobra.Command, args []string) error {
 		if ctx.Err() != nil {
 			break
 		}
-		mapped := diffApplyMapping(r.Data, s.Mapping)
+		mapped := fingerprint.NormalizePayload(diffApplyMapping(r.Data, s.Mapping))
 		entityKey := fmt.Sprintf("%v", r.Data[s.Source.EntityKey])
 		if entityKey == "" || entityKey == "<nil>" {
 			continue
@@ -142,7 +142,9 @@ func runDiff(_ *cobra.Command, args []string) error {
 		var prevPayload map[string]any
 		if !isFirstSeen {
 			prevFP = es.CurrentFingerprint
-			prevPayload = es.CurrentPayload
+			// Normalize prevPayload too: old state rows may pre-date normalization,
+			// and JSON round-trip can produce json.Number instead of int/float.
+			prevPayload = fingerprint.NormalizePayload(es.CurrentPayload)
 		}
 
 		fieldDiff := diff.Compute(prevPayload, mapped)
@@ -167,11 +169,8 @@ func runDiff(_ *cobra.Command, args []string) error {
 			Rules:     plan.TriggeredRules,
 		}
 		if !isFirstSeen && !plan.Skipped() {
-			for k, cur := range mapped {
-				prev := prevPayload[k]
-				if fmt.Sprintf("%v", prev) != fmt.Sprintf("%v", cur) {
-					rec.Fields = append(rec.Fields, fieldChange{Field: k, From: prev, To: cur})
-				}
+			for field, fc := range fieldDiff {
+				rec.Fields = append(rec.Fields, fieldChange{Field: field, From: fc.Previous, To: fc.Current})
 			}
 		}
 

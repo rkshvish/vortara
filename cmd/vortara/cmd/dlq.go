@@ -18,15 +18,24 @@ var dlqCmd = &cobra.Command{
 	Short: "Inspect dead-lettered rows",
 }
 
-var dlqShowCmd = &cobra.Command{
-	Use:   "show <sync.yaml>",
-	Short: "Show dead-lettered rows",
+var dlqListCmd = &cobra.Command{
+	Use:   "list <sync.yaml>",
+	Short: "List dead-lettered rows",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runDLQShow,
 }
 
+var dlqShowCmd = &cobra.Command{
+	Use:        "show <sync.yaml>",
+	Short:      "Show dead-lettered rows (alias for list)",
+	Args:       cobra.ExactArgs(1),
+	RunE:       runDLQShow,
+	Deprecated: "use 'dlq list' instead",
+}
+
 func init() {
 	dlqCmd.PersistentFlags().StringVar(&flagDLQFile, "file", "", "DLQ file path (default: errors.dlq_path or ./dlq/<name>.dlq.jsonl)")
+	dlqCmd.AddCommand(dlqListCmd)
 	dlqCmd.AddCommand(dlqShowCmd)
 }
 

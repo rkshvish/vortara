@@ -5,15 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/rkshvish/vortara/internal/connector/source"
 	"github.com/rkshvish/vortara/internal/decision"
 	"github.com/rkshvish/vortara/internal/diff"
+	"github.com/rkshvish/vortara/internal/engine"
+	"github.com/rkshvish/vortara/internal/fingerprint"
+	"github.com/rkshvish/vortara/internal/registry"
+	conncfg "github.com/rkshvish/vortara/pkg/config"
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
+	"github.com/rkshvish/vortara/pkg/row"
 )
 
 var (
@@ -23,7 +31,7 @@ var (
 
 var explainCmd = &cobra.Command{
 	Use:   "explain <sync.yaml>",
-	Short: "Explain the current decision and field changes for one entity",
+	Short: "Explain the planned decision for one entity against its current source row",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runExplain,
 }
@@ -34,7 +42,7 @@ func init() {
 	explainCmd.Flags().BoolVar(&explainJSON, "json", false, "Output as JSON")
 }
 
-// --- output types (also used as JSON schema) ---
+// --- output types ---
 
 type explainFieldChange struct {
 	Previous any `json:"previous"`
@@ -51,9 +59,10 @@ type explainRuleTrace struct {
 }
 
 type explainSafety struct {
-	MaxCreatesPerRun int `json:"max_creates_per_run,omitempty"`
-	MaxUpdatesPerRun int `json:"max_updates_per_run,omitempty"`
-	MaxDeletesPerRun int `json:"max_deletes_per_run,omitempty"`
+	MaxCreatesPerRun     int     `json:"max_creates_per_run,omitempty"`
+	MaxUpdatesPerRun     int     `json:"max_updates_per_run,omitempty"`
+	MaxDeletesPerRun     int     `json:"max_deletes_per_run,omitempty"`
+	RequireApprovalAbove float64 `json:"require_approval_above,omitempty"`
 }
 
 type explainHistoryItem struct {
@@ -65,24 +74,26 @@ type explainHistoryItem struct {
 }
 
 type explainOutput struct {
-	EntityKey          string                        `json:"entity_key"`
-	SyncName           string                        `json:"sync_name"`
-	Destination        string                        `json:"destination"`
-	DestID             string                        `json:"dest_id,omitempty"`
-	Version            int                           `json:"version"`
-	LastDecision       string                        `json:"last_decision"`
-	LastStatus         string                        `json:"last_status"`
-	UpdatedAt          string                        `json:"updated_at"`
-	FingerprintChanged bool                          `json:"fingerprint_changed"`
-	Decision           string                        `json:"decision"` // what would happen if run now
-	Rules              []explainRuleTrace            `json:"rules,omitempty"`
-	FieldChanges       map[string]explainFieldChange `json:"field_changes,omitempty"`
-	RememberedState    map[string]any                `json:"remembered_state,omitempty"`
-	Safety             *explainSafety                `json:"safety,omitempty"`
-	RecentHistory      []explainHistoryItem          `json:"recent_history,omitempty"`
+	EntityKey       string                        `json:"entity_key"`
+	SyncName        string                        `json:"sync_name"`
+	Destination     string                        `json:"destination"`
+	DestURL         string                        `json:"destination_url,omitempty"`
+	DestID          string                        `json:"dest_id,omitempty"`
+	IdempotencyKey  string                        `json:"idempotency_key,omitempty"`
+	Version         int                           `json:"version"`
+	LastDecision    string                        `json:"last_decision,omitempty"`
+	LastStatus      string                        `json:"last_status,omitempty"`
+	UpdatedAt       string                        `json:"updated_at,omitempty"`
+	SourceFound     bool                          `json:"source_found"`
+	Decision        string                        `json:"decision"`
+	Rules           []explainRuleTrace            `json:"rules,omitempty"`
+	FieldChanges    map[string]explainFieldChange `json:"field_changes,omitempty"`
+	RememberedState map[string]any                `json:"remembered_state,omitempty"`
+	Safety          *explainSafety                `json:"safety,omitempty"`
+	RecentHistory   []explainHistoryItem          `json:"recent_history,omitempty"`
 }
 
-func runExplain(cmd *cobra.Command, args []string) error {
+func runExplain(_ *cobra.Command, args []string) error {
 	f, err := synccfg.Load(args[0])
 	if err != nil {
 		return err
@@ -94,33 +105,66 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	s := f.Sync
 	destType := s.Destination.Type
 
+	// --- load existing entity state (may be nil for first_seen) ---
 	es, err := store.GetEntityState(ctx, s.Name, destType, explainEntityKey)
 	if err != nil {
 		return err
 	}
-	if es == nil {
-		fmt.Fprintf(os.Stderr, "Entity %q has not been seen yet in sync %q.\n", explainEntityKey, s.Name)
+
+	// --- extract current row from the source ---
+	var currentMapped map[string]any
+	currentMapped, err = explainFetchCurrentRow(ctx, s, explainEntityKey)
+	if err != nil {
+		// Non-fatal: fall back to stored state if source is unavailable.
+		fmt.Fprintf(os.Stderr, "warn: could not fetch current source row (%v); showing stored state only\n", err)
+	}
+
+	if currentMapped == nil && es == nil {
+		fmt.Fprintf(os.Stderr, "Entity %q not found in source or state for sync %q.\n", explainEntityKey, s.Name)
 		os.Exit(1)
 	}
 
-	// Reconstruct the decision input from stored state.
-	fpChanged := es.PreviousFingerprint != es.CurrentFingerprint && es.PreviousFingerprint != ""
-	fieldDiff := diff.Compute(es.PreviousPayload, es.CurrentPayload)
+	// --- build the decision input ---
+	var prevPayload map[string]any
+	var prevFP string
+	if es != nil {
+		prevPayload = fingerprint.NormalizePayload(es.CurrentPayload)
+		prevFP = es.CurrentFingerprint
+	}
+
+	// If we could not reach the source, reconstruct from stored state (last-run diff).
+	if currentMapped == nil {
+		currentMapped = fingerprint.NormalizePayload(es.CurrentPayload)
+	}
+
+	// Build fingerprint exclusion set matching engine logic.
+	var fpExclude []string
+	for _, m := range s.Mapping {
+		if m.ExcludeFromFingerprint {
+			fpExclude = append(fpExclude, m.DestName())
+		}
+	}
+	fpExclude = append(fpExclude, s.State.Fingerprint.Exclude...)
+	fpInclude := explainFPIncludeSet(s.State.Fingerprint.Include)
+
+	curFP := fingerprint.Of(explainFPFields(currentMapped, fpInclude), fpExclude...)
+	fieldDiff := diff.Compute(prevPayload, currentMapped)
+
 	in := decision.Input{
-		IsFirstSeen:        es.PreviousFingerprint == "",
-		FingerprintChanged: fpChanged,
+		IsFirstSeen:        es == nil,
+		FingerprintChanged: curFP != prevFP,
 		Diff:               fieldDiff,
-		PreviousPayload:    es.PreviousPayload,
-		CurrentPayload:     es.CurrentPayload,
-		RememberedState:    es.RememberedState,
+		PreviousPayload:    prevPayload,
+		CurrentPayload:     currentMapped,
+	}
+	if es != nil {
+		in.RememberedState = es.RememberedState
 	}
 
 	plan, traces, err := decision.Trace(ctx, s.Decisions, in, s.Name, destType, explainEntityKey, store)
@@ -128,23 +172,27 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("decision trace: %w", err)
 	}
 
-	history, err := store.GetDecisionHistory(ctx, s.Name, destType, explainEntityKey, 10)
-	if err != nil {
-		return err
-	}
+	// Deterministic idempotency key the engine would use.
+	idempotencyKey := engine.ExplainDeliveryKey(s.Name, destType, explainEntityKey, string(plan.Action), curFP)
 
-	// Build output struct.
+	history, _ := store.GetDecisionHistory(ctx, s.Name, destType, explainEntityKey, 10)
+
+	// --- assemble output ---
 	out := explainOutput{
-		EntityKey:          explainEntityKey,
-		SyncName:           s.Name,
-		Destination:        destType,
-		DestID:             es.DestinationID,
-		Version:            es.Version,
-		LastDecision:       es.LastDecision,
-		LastStatus:         es.LastStatus,
-		UpdatedAt:          es.UpdatedAt.UTC().Format(time.RFC3339),
-		FingerprintChanged: fpChanged,
-		Decision:           string(plan.Action),
+		EntityKey:      explainEntityKey,
+		SyncName:       s.Name,
+		Destination:    destType,
+		DestURL:        s.Destination.URL,
+		IdempotencyKey: idempotencyKey,
+		SourceFound:    currentMapped != nil,
+		Decision:       string(plan.Action),
+	}
+	if es != nil {
+		out.DestID = es.DestinationID
+		out.Version = es.Version
+		out.LastDecision = es.LastDecision
+		out.LastStatus = es.LastStatus
+		out.UpdatedAt = es.UpdatedAt.UTC().Format(time.RFC3339)
 	}
 
 	for _, tr := range traces {
@@ -157,7 +205,6 @@ func runExplain(cmd *cobra.Command, args []string) error {
 			Winner:      tr.Winner,
 		})
 	}
-	// Default action appended as a synthetic rule.
 	if len(traces) == 0 {
 		out.Rules = append(out.Rules, explainRuleTrace{
 			Rule:    "(default)",
@@ -174,19 +221,19 @@ func runExplain(cmd *cobra.Command, args []string) error {
 			out.FieldChanges[field] = explainFieldChange{Previous: ch.Previous, Current: ch.Current}
 		}
 	}
-
-	if len(es.RememberedState) > 0 {
+	if es != nil && len(es.RememberedState) > 0 {
 		out.RememberedState = es.RememberedState
 	}
 
-	if s.Safety.MaxCreatesPerRun > 0 || s.Safety.MaxUpdatesPerRun > 0 || s.Safety.MaxDeletesPerRun > 0 {
+	if s.Safety.MaxCreatesPerRun > 0 || s.Safety.MaxUpdatesPerRun > 0 ||
+		s.Safety.MaxDeletesPerRun > 0 || s.Safety.RequireApprovalAbove > 0 {
 		out.Safety = &explainSafety{
-			MaxCreatesPerRun: s.Safety.MaxCreatesPerRun,
-			MaxUpdatesPerRun: s.Safety.MaxUpdatesPerRun,
-			MaxDeletesPerRun: s.Safety.MaxDeletesPerRun,
+			MaxCreatesPerRun:     s.Safety.MaxCreatesPerRun,
+			MaxUpdatesPerRun:     s.Safety.MaxUpdatesPerRun,
+			MaxDeletesPerRun:     s.Safety.MaxDeletesPerRun,
+			RequireApprovalAbove: s.Safety.RequireApprovalAbove,
 		}
 	}
-
 	for _, ev := range history {
 		out.RecentHistory = append(out.RecentHistory, explainHistoryItem{
 			RunID:    ev.RunID,
@@ -207,20 +254,132 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// explainFetchCurrentRow extracts only the row matching entityKey from the source.
+func explainFetchCurrentRow(ctx context.Context, s synccfg.SyncSpec, entityKey string) (map[string]any, error) {
+	rawSrc, err := registry.GetBatchSource(s.Source.Type)
+	if err != nil {
+		return nil, fmt.Errorf("source: %w", err)
+	}
+	src, ok := rawSrc.(source.BatchSource)
+	if !ok {
+		return nil, fmt.Errorf("source %q is not a BatchSource", s.Source.Type)
+	}
+
+	cfg := conncfg.SourceConfig{
+		Type:       s.Source.Type,
+		URL:        s.Source.URL,
+		Connection: s.Source.URL,
+		Table:      s.Source.Table,
+		Query:      s.Source.Query,
+		BatchSize:  s.Source.BatchSize,
+		Options:    map[string]string{},
+	}
+	if s.Source.Watermark != nil {
+		cfg.WatermarkColumn = s.Source.Watermark.Column
+	}
+	if s.Source.Auth != nil {
+		cfg.Auth = conncfg.AuthConfig{
+			Type: s.Source.Auth.Type, Token: s.Source.Auth.Token,
+			ClientID: s.Source.Auth.ClientID, ClientSecret: s.Source.Auth.ClientSecret,
+			TokenURL: s.Source.Auth.TokenURL,
+			Username: s.Source.Auth.Username, Password: s.Source.Auth.Password,
+		}
+	}
+	if err := src.Connect(ctx, cfg); err != nil {
+		return nil, fmt.Errorf("source connect: %w", err)
+	}
+	defer src.Close()
+
+	out := make(chan row.Row, 256)
+	done := make(chan error, 1)
+	go func() {
+		done <- src.Extract(ctx, time.Time{}, time.Time{}, out)
+	}()
+
+	var found map[string]any
+	for r := range out {
+		k := fmt.Sprintf("%v", r.Data[s.Source.EntityKey])
+		if k == entityKey {
+			found = fingerprint.NormalizePayload(explainApplyMapping(r.Data, s.Mapping))
+			// Drain the channel so the goroutine can finish.
+			go func() {
+				for range out {
+				}
+			}()
+			break
+		}
+	}
+	if err := <-done; err != nil && ctx.Err() == nil {
+		return found, err
+	}
+	return found, nil
+}
+
+func explainApplyMapping(data map[string]any, mapping []synccfg.MappingEntry) map[string]any {
+	if len(mapping) == 0 {
+		out := make(map[string]any, len(data))
+		for k, v := range data {
+			out[k] = v
+		}
+		return out
+	}
+	out := make(map[string]any, len(mapping))
+	for _, m := range mapping {
+		if v, ok := data[m.Source]; ok {
+			out[m.DestName()] = v
+		}
+	}
+	return out
+}
+
+func explainFPIncludeSet(include []string) map[string]struct{} {
+	if len(include) == 0 {
+		return nil
+	}
+	s := make(map[string]struct{}, len(include))
+	for _, f := range include {
+		s[f] = struct{}{}
+	}
+	return s
+}
+
+func explainFPFields(data map[string]any, include map[string]struct{}) map[string]any {
+	if include == nil {
+		return data
+	}
+	out := make(map[string]any, len(include))
+	for k, v := range data {
+		if _, ok := include[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func printExplain(out explainOutput, s synccfg.SyncSpec) {
 	fmt.Printf("Entity:      %s\n", out.EntityKey)
 	fmt.Printf("Sync:        %s\n", out.SyncName)
-	fmt.Printf("Destination: %s\n", out.Destination)
+	fmt.Printf("Destination: %s", out.Destination)
+	if out.DestURL != "" {
+		fmt.Printf("  (%s)", out.DestURL)
+	}
+	fmt.Println()
 	if out.DestID != "" {
 		fmt.Printf("Dest ID:     %s\n", out.DestID)
 	}
-	fmt.Printf("Version:     %d\n", out.Version)
-	fmt.Printf("Last action: %s (%s)\n", out.LastDecision, out.LastStatus)
-	fmt.Printf("Updated:     %s\n", out.UpdatedAt)
+	if !out.SourceFound {
+		fmt.Println("\n  [source row not available — showing stored state]")
+	}
+	if out.Version > 0 {
+		fmt.Printf("Version:     %d\n", out.Version)
+	}
+	if out.LastDecision != "" {
+		fmt.Printf("Last action: %s (%s) at %s\n", out.LastDecision, out.LastStatus, out.UpdatedAt)
+	}
 
 	// Field changes.
 	if len(out.FieldChanges) > 0 {
-		fmt.Println("\nField changes (last run → current):")
+		fmt.Println("\nField changes:")
 		fields := make([]string, 0, len(out.FieldChanges))
 		for f := range out.FieldChanges {
 			fields = append(fields, f)
@@ -232,29 +391,33 @@ func printExplain(out explainOutput, s synccfg.SyncSpec) {
 		}
 	}
 
-	// Decision trace.
+	// Decision.
 	fmt.Printf("\nDecision: %s\n", strings.ToUpper(out.Decision))
+
+	// Rule trace.
 	if len(out.Rules) > 0 {
 		fmt.Println("\nRules evaluated:")
 		for _, tr := range out.Rules {
-			if tr.FiredBefore {
-				fmt.Printf("  ✗ %-30s [skipped: once:true already fired]\n", tr.Rule)
-				continue
-			}
-			mark := "✗"
-			extra := ""
-			if tr.Matched {
-				mark = "✓"
-			}
-			if tr.Winner {
-				extra = " ← winner"
-			}
 			action := ""
 			if tr.Action != "" {
-				action = fmt.Sprintf("[→ %s]  ", tr.Action)
+				action = fmt.Sprintf("[→ %s] ", tr.Action)
 			}
-			fmt.Printf("  %s %-30s %s%s%s\n", mark, tr.Rule, action, tr.Reason, extra)
+			switch {
+			case tr.FiredBefore:
+				fmt.Printf("  - %-30s %sskipped (once:true already fired)\n", tr.Rule, action)
+			case tr.Winner:
+				fmt.Printf("  ✓ %-30s %smatched, selected\n", tr.Rule, action)
+			case tr.Matched:
+				fmt.Printf("  ✓ %-30s %smatched, not selected (first-match-wins)\n", tr.Rule, action)
+			default:
+				fmt.Printf("  ✗ %-30s %sdid not match\n", tr.Rule, action)
+			}
 		}
+	}
+
+	// Idempotency key.
+	if out.IdempotencyKey != "" {
+		fmt.Printf("\nIdempotency key: %s\n", out.IdempotencyKey)
 	}
 
 	// Remembered state.
@@ -270,21 +433,21 @@ func printExplain(out explainOutput, s synccfg.SyncSpec) {
 		}
 	}
 
-	// Safety limits.
+	// Safety.
 	if out.Safety != nil {
 		fmt.Println("\nSafety limits:")
 		if out.Safety.MaxCreatesPerRun > 0 {
-			fmt.Printf("  max_creates_per_run:  %d\n", out.Safety.MaxCreatesPerRun)
+			fmt.Printf("  max_creates_per_run:    %d\n", out.Safety.MaxCreatesPerRun)
 		}
 		if out.Safety.MaxUpdatesPerRun > 0 {
-			fmt.Printf("  max_updates_per_run:  %d\n", out.Safety.MaxUpdatesPerRun)
+			fmt.Printf("  max_updates_per_run:    %d\n", out.Safety.MaxUpdatesPerRun)
 		}
 		if out.Safety.MaxDeletesPerRun > 0 {
-			fmt.Printf("  max_deletes_per_run:  %d\n", out.Safety.MaxDeletesPerRun)
+			fmt.Printf("  max_deletes_per_run:    %d\n", out.Safety.MaxDeletesPerRun)
 		}
-	}
-	if s.Safety.RequireApprovalAbove > 0 {
-		fmt.Printf("  require_approval_above: %.0f\n", s.Safety.RequireApprovalAbove)
+		if out.Safety.RequireApprovalAbove > 0 {
+			fmt.Printf("  require_approval_above: %.0f\n", out.Safety.RequireApprovalAbove)
+		}
 	}
 
 	// Decision history.

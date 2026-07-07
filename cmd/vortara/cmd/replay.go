@@ -7,13 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rkshvish/vortara/internal/connector/destination"
 	"github.com/rkshvish/vortara/internal/engine"
+	"github.com/rkshvish/vortara/internal/fingerprint"
 	vlogger "github.com/rkshvish/vortara/internal/logger"
 	"github.com/rkshvish/vortara/internal/registry"
+	"github.com/rkshvish/vortara/internal/state"
 	conncfg "github.com/rkshvish/vortara/pkg/config"
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 	"github.com/rkshvish/vortara/pkg/row"
@@ -139,23 +142,62 @@ func runReplay(_ *cobra.Command, args []string) error {
 	}
 	defer dest.Close()
 
-	// Reset delivery idempotency for these rows so they can be re-sent
+	// Reset delivery idempotency for these rows so they can be re-sent.
 	if err := store.BeginBatch(ctx); err != nil {
 		return err
 	}
 
 	var loaded, errored int
 	for _, rec := range records {
+		// Use the same deterministic key the engine would generate. We re-derive
+		// it from the stored payload fingerprint so idempotency works across retries.
+		data := fingerprint.NormalizePayload(rec.Data)
+		curFP := fingerprint.Of(data)
+		opKey := engine.ExplainDeliveryKey(rec.SyncName, s.Destination.Type, rec.EntityKey, "replay", curFP)
+
 		r := row.Row{
-			ID:         rec.EntityKey,
+			ID:         opKey,
 			PrimaryKey: rec.EntityKey,
-			Data:       rec.Data,
+			Data:       data,
 		}
 		res, loadErr := dest.Load(ctx, []row.Row{r}, store, s.Name, s.Destination.Type)
 		loaded += res.Loaded
+
 		if loadErr != nil {
 			errored++
 			fmt.Fprintf(os.Stderr, "error replaying %s: %v\n", rec.EntityKey, loadErr)
+			continue
+		}
+		for _, re := range res.Errors {
+			errored++
+			fmt.Fprintf(os.Stderr, "error replaying %s: %v\n", rec.EntityKey, re.Err)
+		}
+
+		// Update entity state to "success" only when delivery actually landed.
+		if res.Loaded > 0 && len(res.Errors) == 0 {
+			es, _ := store.GetEntityState(ctx, s.Name, s.Destination.Type, rec.EntityKey)
+			var version int
+			if es != nil {
+				version = es.Version
+			}
+			newState := &state.EntityState{
+				SyncName:           s.Name,
+				Destination:        s.Destination.Type,
+				EntityKey:          rec.EntityKey,
+				CurrentFingerprint: curFP,
+				CurrentPayload:     data,
+				LastDecision:       "replay",
+				LastStatus:         "success",
+				Version:            version + 1,
+				UpdatedAt:          time.Now().UTC(),
+			}
+			if es != nil {
+				newState.PreviousFingerprint = es.CurrentFingerprint
+				newState.PreviousPayload = es.CurrentPayload
+				newState.RememberedState = es.RememberedState
+				newState.DestinationID = es.DestinationID
+			}
+			_ = store.SaveEntityState(ctx, newState)
 		}
 	}
 

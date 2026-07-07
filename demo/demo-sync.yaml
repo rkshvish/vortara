@@ -1,0 +1,130 @@
+sync:
+  name: demo-pql
+  description: "Demo sync: Postgres leads → REST webhook — proves failure → DLQ → replay"
+
+  source:
+    type: postgres
+    url: "${DEMO_DB_URL}"
+    query: |
+      SELECT
+        id,
+        email,
+        first_name,
+        last_name,
+        company,
+        title,
+        lead_score,
+        lifecycle_stage,
+        last_activity_at,
+        created_at
+      FROM leads
+      WHERE lead_score IS NOT NULL
+    entity_key: id
+
+  mapping:
+    - source: id
+    - source: email
+    - source: first_name
+      dest: firstName
+    - source: last_name
+      dest: lastName
+    - source: company
+    - source: title
+    - source: lead_score
+      dest: leadScore
+    - source: lifecycle_stage
+      dest: lifecycleStage
+    - source: last_activity_at
+      dest: lastActivityAt
+      exclude_from_fingerprint: true
+    - source: created_at
+      dest: createdAt
+      exclude_from_fingerprint: true
+
+  state:
+    backend: sqlite
+    path: ./state/demo-pql.db
+    fingerprint:
+      exclude:
+        - lastActivityAt
+        - createdAt
+
+  decisions:
+    default: skip
+    rules:
+      - name: new-lead
+        when: first_seen()
+        action: create
+
+      - name: score-changed
+        when:
+          fingerprint_changed: {}
+        action: update
+
+  destination:
+    type: restapi
+    url: "http://localhost:18081/webhook"
+    method: POST
+
+  safety:
+    max_creates_per_run: 100
+    max_updates_per_run: 100
+
+  errors:
+    on_error: skip
+    dlq:
+      path: ./dlq/demo-pql.dlq.jsonl
+      on_status: [500, 502, 503]
+
+  tests:
+    - name: first_seen_creates
+      previous: null
+      current:
+        id: lead_001
+        email: alice@acme.com
+        firstName: Alice
+        lastName: Smith
+        leadScore: 88
+        lifecycleStage: mql
+      expect:
+        decision: create
+        triggered_rules:
+          - new-lead
+
+    - name: score_change_updates
+      previous:
+        id: lead_001
+        email: alice@acme.com
+        firstName: Alice
+        lastName: Smith
+        leadScore: 88
+        lifecycleStage: mql
+      current:
+        id: lead_001
+        email: alice@acme.com
+        firstName: Alice
+        lastName: Smith
+        leadScore: 95
+        lifecycleStage: mql
+      expect:
+        decision: update
+        triggered_rules:
+          - score-changed
+        changed_fields:
+          - leadScore
+
+    - name: timestamp_only_skips
+      previous:
+        id: lead_001
+        email: alice@acme.com
+        leadScore: 95
+        lifecycleStage: mql
+        lastActivityAt: "2026-07-01T10:00:00Z"
+      current:
+        id: lead_001
+        email: alice@acme.com
+        leadScore: 95
+        lifecycleStage: mql
+        lastActivityAt: "2026-07-02T10:00:00Z"
+      expect:
+        decision: skip

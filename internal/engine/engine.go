@@ -140,3 +140,9 @@ func (e *Engine) SetApprovalHash(hash string) {
 func (e *Engine) markDone() {
 	e.doneOnce.Do(func() { close(e.doneCh) })
 }
+
+// ExplainDeliveryKey returns the deterministic idempotency key the engine would
+// assign to a planned delivery. Exported for the explain CLI command.
+func ExplainDeliveryKey(syncName, destName, entityKey, action, curFingerprint string) string {
+	return deliveryOpKey(syncName, destName, entityKey, action, curFingerprint)
+}

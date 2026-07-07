@@ -3,34 +3,25 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rkshvish/vortara/internal/decision"
-	"github.com/rkshvish/vortara/internal/diff"
+	diffpkg "github.com/rkshvish/vortara/internal/diff"
 	"github.com/rkshvish/vortara/internal/fingerprint"
 	synccfg "github.com/rkshvish/vortara/pkg/config/sync"
 )
 
-var testStateTests bool
-
 var testCmd = &cobra.Command{
 	Use:   "test <sync.yaml>",
-	Short: "Run inline state unit tests defined in a sync YAML",
+	Short: "Run inline state unit tests defined in a sync YAML (under tests:)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTestCmd,
 }
 
-func init() {
-	testCmd.Flags().BoolVar(&testStateTests, "state-tests", false, "Run state unit tests defined in the sync YAML under tests:")
-}
-
 func runTestCmd(_ *cobra.Command, args []string) error {
-	if !testStateTests {
-		return fmt.Errorf("specify --state-tests to run inline state unit tests")
-	}
-
 	f, err := synccfg.Load(args[0])
 	if err != nil {
 		return err
@@ -39,10 +30,20 @@ func runTestCmd(_ *cobra.Command, args []string) error {
 	s := f.Sync
 	if len(s.Tests) == 0 {
 		fmt.Printf("No state tests defined in %s\n", args[0])
+		fmt.Println("Add a 'tests:' section to your sync YAML. Example:")
+		fmt.Println()
+		fmt.Println("  tests:")
+		fmt.Println("    - name: first_seen_creates")
+		fmt.Println("      previous: null")
+		fmt.Println("      current:")
+		fmt.Println("        id: user_001")
+		fmt.Println("        email: alice@example.com")
+		fmt.Println("      expect:")
+		fmt.Println("        decision: create")
 		return nil
 	}
 
-	// Build fingerprint helpers matching the engine's logic.
+	// Fingerprint config matching the engine.
 	fpInclude := testBuildFPInclude(s.State.Fingerprint.Include)
 	var fpExclude []string
 	for _, m := range s.Mapping {
@@ -54,34 +55,45 @@ func runTestCmd(_ *cobra.Command, args []string) error {
 
 	passed, failed := 0, 0
 	for _, tc := range s.Tests {
-		curFP := fingerprint.Of(testFPFields(tc.Current, fpInclude), fpExclude...)
-		prevFP := ""
+		// Normalize payloads (same as engine) so timestamp types don't cause false failures.
+		current := fingerprint.NormalizePayload(tc.Current)
+		var previous map[string]any
 		if tc.Previous != nil {
-			prevFP = fingerprint.Of(testFPFields(tc.Previous, fpInclude), fpExclude...)
+			previous = fingerprint.NormalizePayload(tc.Previous)
 		}
 
-		fieldDiff := diff.Compute(tc.Previous, tc.Current)
+		curFP := fingerprint.Of(testFPFields(current, fpInclude), fpExclude...)
+		prevFP := ""
+		if previous != nil {
+			prevFP = fingerprint.Of(testFPFields(previous, fpInclude), fpExclude...)
+		}
+
+		fieldDiff := diffpkg.Compute(previous, current)
 
 		in := decision.Input{
-			IsFirstSeen:        tc.Previous == nil,
+			IsFirstSeen:        previous == nil,
 			FingerprintChanged: curFP != prevFP,
 			Diff:               fieldDiff,
-			PreviousPayload:    tc.Previous,
-			CurrentPayload:     tc.Current,
+			PreviousPayload:    previous,
+			CurrentPayload:     current,
 		}
 
-		// nil checker: once:true rules are always evaluated in tests (no prior firing state).
+		// once:true rules are always unevaluated-history in tests (pass nil checker).
 		plan, evalErr := decision.Evaluate(context.Background(), s.Decisions, in, s.Name, "test", "test-entity", nil)
 		if evalErr != nil {
-			fmt.Printf("FAIL  %s — evaluation error: %v\n", tc.Name, evalErr)
+			fmt.Printf("FAIL  %-40s  evaluation error: %v\n", tc.Name, evalErr)
 			failed++
 			continue
 		}
 
 		var failures []string
+
+		// Decision assertion.
 		if string(plan.Action) != tc.Expect.Decision {
 			failures = append(failures, fmt.Sprintf("decision: want %q got %q", tc.Expect.Decision, plan.Action))
 		}
+
+		// Triggered rules assertion.
 		if len(tc.Expect.TriggeredRules) > 0 {
 			if !testSlicesEqual(plan.TriggeredRules, tc.Expect.TriggeredRules) {
 				failures = append(failures, fmt.Sprintf("triggered_rules: want %v got %v",
@@ -89,11 +101,27 @@ func runTestCmd(_ *cobra.Command, args []string) error {
 			}
 		}
 
+		// Changed fields assertion: every listed field must appear in the diff.
+		// This is a "must contain" check — other fields may also differ.
+		if len(tc.Expect.ChangedFields) > 0 {
+			var missing []string
+			for _, f := range tc.Expect.ChangedFields {
+				if !fieldDiff.Contains(f) {
+					missing = append(missing, f)
+				}
+			}
+			if len(missing) > 0 {
+				sort.Strings(missing)
+				failures = append(failures, fmt.Sprintf("changed_fields: expected %v not in diff (diff has: %v)",
+					missing, diffKeys(fieldDiff)))
+			}
+		}
+
 		if len(failures) == 0 {
 			fmt.Printf("PASS  %s\n", tc.Name)
 			passed++
 		} else {
-			fmt.Printf("FAIL  %s — %s\n", tc.Name, strings.Join(failures, "; "))
+			fmt.Printf("FAIL  %-40s  %s\n", tc.Name, strings.Join(failures, "; "))
 			failed++
 		}
 	}
@@ -127,6 +155,15 @@ func testBuildFPInclude(include []string) map[string]struct{} {
 		s[f] = struct{}{}
 	}
 	return s
+}
+
+func diffKeys(d diffpkg.Result) []string {
+	keys := make([]string, 0, len(d))
+	for k := range d {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func testSlicesEqual(a, b []string) bool {

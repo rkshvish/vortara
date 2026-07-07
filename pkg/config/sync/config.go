@@ -231,6 +231,7 @@ type TestCase struct {
 type TestExpect struct {
 	Decision       string   `yaml:"decision"`
 	TriggeredRules []string `yaml:"triggered_rules,omitempty"`
+	ChangedFields  []string `yaml:"changed_fields,omitempty"` // field names that must appear in the diff
 }
 
 // ResolvedDLQPath returns dlq.path if set, falling back to the top-level dlq_path.
