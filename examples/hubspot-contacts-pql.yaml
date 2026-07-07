@@ -11,10 +11,11 @@ sync:
         first_name,
         last_name,
         company,
-        lead_score,
-        lifecycle_stage,
-        last_activity_at
-      FROM leads
+        job_title,
+        arr,
+        status,
+        updated_at
+      FROM contacts
       WHERE email IS NOT NULL
     entity_key: id
 
@@ -28,20 +29,14 @@ sync:
     - source: last_name
       dest: lastname
     - source: company
-    - source: lead_score
-      dest: vortara_lead_score
-    - source: lifecycle_stage
-      dest: lifecyclestage
-    - source: last_activity_at
-      dest: vortara_last_activity_at
-      exclude_from_fingerprint: true
+    - source: job_title
+      dest: jobtitle
+    - source: arr
+      dest: annualrevenue
 
   state:
     backend: sqlite
     path: ./state/pql-to-hubspot.db
-    fingerprint:
-      exclude:
-        - vortara_last_activity_at
 
   decisions:
     default: skip
@@ -78,47 +73,50 @@ sync:
     - name: first_seen_creates
       previous: null
       current:
-        email: alice@example.com
+        email: alice@acme.com
         firstname: Alice
         lastname: Smith
         company: Acme Corp
-        vortara_lead_score: 88
-        lifecyclestage: mql
+        jobtitle: VP Engineering
+        annualrevenue: "120000"
+        vortara_status: active
       expect:
         decision: create
         triggered_rules:
           - new-contact
 
-    - name: score_change_updates
+    - name: arr_change_updates
       previous:
-        email: alice@example.com
+        email: alice@acme.com
         firstname: Alice
         lastname: Smith
-        vortara_lead_score: 88
-        lifecyclestage: mql
+        company: Acme Corp
+        annualrevenue: "120000"
+        vortara_status: active
       current:
-        email: alice@example.com
+        email: alice@acme.com
         firstname: Alice
         lastname: Smith
-        vortara_lead_score: 95
-        lifecyclestage: mql
+        company: Acme Corp
+        annualrevenue: "150000"
+        vortara_status: active
       expect:
         decision: update
         triggered_rules:
           - meaningful-change
         changed_fields:
-          - vortara_lead_score
+          - annualrevenue
 
     - name: timestamp_only_skips
       previous:
-        email: alice@example.com
-        vortara_lead_score: 95
-        lifecyclestage: mql
-        vortara_last_activity_at: "2026-07-01T10:00:00Z"
+        email: alice@acme.com
+        annualrevenue: "120000"
+        vortara_status: active
+        vortara_updated_at: "2026-07-01T10:00:00Z"
       current:
-        email: alice@example.com
-        vortara_lead_score: 95
-        lifecyclestage: mql
-        vortara_last_activity_at: "2026-07-02T10:00:00Z"
+        email: alice@acme.com
+        annualrevenue: "120000"
+        vortara_status: active
+        vortara_updated_at: "2026-07-02T10:00:00Z"
       expect:
         decision: skip
