@@ -8,7 +8,7 @@ It lets you define *when* records create, update, skip, fail, replay, or trigger
 
 Vortara runs as a Go CLI and keeps sync state in your own infrastructure, starting with SQLite for local and self-hosted workflows.
 
-```
+```bash
 make demo
 ```
 
@@ -257,7 +257,7 @@ Run with: `vortara test sync.yaml`
 
 ## DLQ + replay
 
-When a destination returns a retryable error (configurable status codes), the row is written to a JSONL dead-letter file instead of being silently dropped. State is saved as `failed`.
+When a destination returns a configured failure status, the row is written to a JSONL dead-letter file instead of being silently dropped. State is saved as `failed`.
 
 ```bash
 vortara dlq list sync.yaml
@@ -308,4 +308,4 @@ Tracked as [GitHub issues](https://github.com/rkshvish/vortara/issues).
 
 ## License
 
-Apache 2.0
+Apache-2.0
