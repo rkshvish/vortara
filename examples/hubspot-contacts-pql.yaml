@@ -1,0 +1,124 @@
+sync:
+  name: pql-to-hubspot
+
+  source:
+    type: postgres
+    url: "${DATABASE_URL}"
+    query: |
+      SELECT
+        id,
+        email,
+        first_name,
+        last_name,
+        company,
+        lead_score,
+        lifecycle_stage,
+        last_activity_at
+      FROM leads
+      WHERE email IS NOT NULL
+    entity_key: id
+
+  required:
+    - email
+
+  mapping:
+    - source: email
+    - source: first_name
+      dest: firstname
+    - source: last_name
+      dest: lastname
+    - source: company
+    - source: lead_score
+      dest: vortara_lead_score
+    - source: lifecycle_stage
+      dest: lifecyclestage
+    - source: last_activity_at
+      dest: vortara_last_activity_at
+      exclude_from_fingerprint: true
+
+  state:
+    backend: sqlite
+    path: ./state/pql-to-hubspot.db
+    fingerprint:
+      exclude:
+        - vortara_last_activity_at
+
+  decisions:
+    default: skip
+    rules:
+      - name: new-contact
+        when: first_seen()
+        action: create
+
+      - name: meaningful-change
+        when:
+          fingerprint_changed: {}
+        action: update
+
+  destination:
+    type: hubspot
+    object: contact
+    match_on: [email]
+    auth:
+      type: bearer
+      token: "${HUBSPOT_PRIVATE_APP_TOKEN}"
+
+  safety:
+    max_creates_per_run: 25
+    max_updates_per_run: 100
+
+  errors:
+    on_error: skip
+    dlq:
+      path: ./dlq/pql-to-hubspot.dlq.jsonl
+      on_status: [400, 401, 403, 409, 422, 429, 500, 502, 503]
+
+  # Run with: vortara test examples/hubspot-contacts-pql.yaml
+  tests:
+    - name: first_seen_creates
+      previous: null
+      current:
+        email: alice@example.com
+        firstname: Alice
+        lastname: Smith
+        company: Acme Corp
+        vortara_lead_score: 88
+        lifecyclestage: mql
+      expect:
+        decision: create
+        triggered_rules:
+          - new-contact
+
+    - name: score_change_updates
+      previous:
+        email: alice@example.com
+        firstname: Alice
+        lastname: Smith
+        vortara_lead_score: 88
+        lifecyclestage: mql
+      current:
+        email: alice@example.com
+        firstname: Alice
+        lastname: Smith
+        vortara_lead_score: 95
+        lifecyclestage: mql
+      expect:
+        decision: update
+        triggered_rules:
+          - meaningful-change
+        changed_fields:
+          - vortara_lead_score
+
+    - name: timestamp_only_skips
+      previous:
+        email: alice@example.com
+        vortara_lead_score: 95
+        lifecyclestage: mql
+        vortara_last_activity_at: "2026-07-01T10:00:00Z"
+      current:
+        email: alice@example.com
+        vortara_lead_score: 95
+        lifecyclestage: mql
+        vortara_last_activity_at: "2026-07-02T10:00:00Z"
+      expect:
+        decision: skip

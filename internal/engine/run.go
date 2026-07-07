@@ -363,6 +363,7 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 		// never pollute the delivery log of a later real run.
 		opKey := deliveryOpKey(s.Name, destName, pd.entityKey, string(pd.plan.Action), pd.curFP)
 
+		var res destination.LoadResult
 		if dest != nil {
 			deliveryRow := row.Row{
 				ID:         opKey,
@@ -370,7 +371,8 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 				Data:       pd.mapped,
 				Watermark:  pd.r.Watermark,
 			}
-			res, loadErr := dest.Load(ctx, []row.Row{deliveryRow}, e.store, s.Name, destName)
+			var loadErr error
+			res, loadErr = dest.Load(ctx, []row.Row{deliveryRow}, e.store, s.Name, destName)
 			stats.RowsLoaded += res.Loaded
 			stats.RowsSkipped += res.Skipped
 			if loadErr != nil {
@@ -381,10 +383,14 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 					firstErr = loadErr
 				}
 				if !e.dryRun {
-					_ = e.store.SaveEntityState(ctx, buildEntityState(
+					es := buildEntityState(
 						s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
 						pd.prevPayload, pd.mapped, pd.es, pd.plan, "failed",
-					))
+					)
+					if pd.es != nil {
+						es.DestinationID = pd.es.DestinationID
+					}
+					_ = e.store.SaveEntityState(ctx, es)
 				}
 				continue
 			}
@@ -398,13 +404,15 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 				if dlq.Enabled() {
 					_ = dlq.Write(deliveryRow, pd.entityKey, re.Err)
 				}
-				// Mark the entity as failed so state inspect and explain show the
-				// failure. This mirrors the top-level loadErr path above.
 				if !e.dryRun {
-					_ = e.store.SaveEntityState(ctx, buildEntityState(
+					es := buildEntityState(
 						s.Name, destName, pd.entityKey, pd.prevFP, pd.curFP,
 						pd.prevPayload, pd.mapped, pd.es, pd.plan, "failed",
-					))
+					)
+					if pd.es != nil {
+						es.DestinationID = pd.es.DestinationID
+					}
+					_ = e.store.SaveEntityState(ctx, es)
 				}
 			}
 			// If all rows errored, skip the success state write below.
@@ -419,8 +427,13 @@ func (e *Engine) runOnce(ctx context.Context, f *synccfg.SyncFile) error {
 		// Dry-run reads real state but must never write it, so subsequent real runs
 		// see the correct baseline and are not skipped by stale fingerprints.
 		if !e.dryRun {
+			// Prefer the destination_id returned by this delivery (e.g. HubSpot
+			// contact ID from create/search); fall back to whatever was stored before.
 			destID := ""
-			if pd.es != nil {
+			if dest != nil && res.DestinationIDs != nil {
+				destID = res.DestinationIDs[opKey]
+			}
+			if destID == "" && pd.es != nil {
 				destID = pd.es.DestinationID
 			}
 			newState := buildEntityState(

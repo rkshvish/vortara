@@ -18,9 +18,10 @@ type RowError struct {
 
 // LoadResult is returned by every destination after a Load call.
 type LoadResult struct {
-	Loaded  int        // rows successfully written
-	Skipped int        // rows skipped (already delivered)
-	Errors  []RowError // rows that failed
+	Loaded         int               // rows successfully written
+	Skipped        int               // rows skipped (already delivered)
+	Errors         []RowError        // rows that failed
+	DestinationIDs map[string]string // rowID → destination-assigned record ID (e.g. HubSpot contact ID)
 }
 
 // Destination is implemented by all output connectors.

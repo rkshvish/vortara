@@ -3,12 +3,11 @@ package destination
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/rkshvish/vortara/internal/state"
@@ -16,247 +15,360 @@ import (
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
-func newHubSpotDestinationForTest(t *testing.T, baseURL string) *HubSpotDestination {
+// hsTestStore is a minimal in-memory StateStore for HubSpot tests.
+type hsTestStore struct {
+	state.StateStore
+	entities  map[string]*state.EntityState
+	delivered map[string]bool
+}
+
+func newHSTestStore() *hsTestStore {
+	return &hsTestStore{
+		entities:  make(map[string]*state.EntityState),
+		delivered: make(map[string]bool),
+	}
+}
+
+func (s *hsTestStore) GetEntityState(_ context.Context, syncName, dest, key string) (*state.EntityState, error) {
+	return s.entities[syncName+"/"+dest+"/"+key], nil
+}
+
+func (s *hsTestStore) SaveEntityState(_ context.Context, es *state.EntityState) error {
+	s.entities[es.SyncName+"/"+es.Destination+"/"+es.EntityKey] = es
+	return nil
+}
+
+func (s *hsTestStore) IsDelivered(_ context.Context, rowID, _, _ string) (bool, error) {
+	return s.delivered[rowID], nil
+}
+
+func (s *hsTestStore) MarkDelivered(_ context.Context, rowID, _, _ string) error {
+	s.delivered[rowID] = true
+	return nil
+}
+
+func hsTestRow(id, primaryKey string, data map[string]any) row.Row {
+	return row.Row{ID: id, PrimaryKey: primaryKey, Data: data}
+}
+
+func connectHS(t *testing.T, baseURL string) *HubSpotDestination {
 	t.Helper()
-	dst := NewHubSpotDestination()
-	cfg := config.DestinationConfig{
-		URL:     baseURL,
-		MatchOn: "email",
-		Options: map[string]string{"object": "contacts"},
+	h := &HubSpotDestination{}
+	err := h.Connect(context.Background(), config.DestinationConfig{
+		URL: baseURL,
 		Auth: config.AuthConfig{
 			Type:  "bearer",
-			Token: "hubspot-token",
+			Token: "test-token",
 		},
-	}
-	if err := dst.Connect(context.Background(), cfg); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	return dst
-}
-
-func hubspotRows(n int) []row.Row {
-	rows := make([]row.Row, n)
-	for i := 0; i < n; i++ {
-		rows[i] = row.Row{
-			ID: fmt.Sprintf("row-%d", i),
-			Data: map[string]any{
-				"email":     fmt.Sprintf("user-%d@example.com", i),
-				"firstname": fmt.Sprintf("First%d", i),
-				"revenue":   50000 + i,
-			},
-		}
-	}
-	return rows
-}
-
-func TestHubSpotDestination_Connect_MissingObject(t *testing.T) {
-	dst := NewHubSpotDestination()
-	err := dst.Connect(context.Background(), config.DestinationConfig{
+		Options: map[string]string{"object": "contacts"},
 		MatchOn: "email",
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestHubSpotDestination_Connect_MissingMatchOn(t *testing.T) {
-	dst := NewHubSpotDestination()
-	err := dst.Connect(context.Background(), config.DestinationConfig{
-		Options: map[string]string{"object": "contacts"},
-	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestHubSpotDestination_Load_Success(t *testing.T) {
-	var body struct {
-		Inputs []struct {
-			IDProperty string            `json:"idProperty"`
-			ID         string            `json:"id"`
-			Properties map[string]string `json:"properties"`
-		} `json:"inputs"`
-	}
-
-	dst := newHubSpotDestinationForTest(t, "https://api.hubapi.com")
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodPost || r.URL.Path != "/crm/v3/objects/contacts/batch/upsert" {
-			return newResponse(http.StatusNotFound, ""), nil
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer hubspot-token" {
-			t.Fatalf("unexpected auth header %q", got)
-		}
-		payload, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
-		}
-		if err := json.Unmarshal(payload, &body); err != nil {
-			t.Fatalf("json.Unmarshal() error = %v", err)
-		}
-		return newResponse(http.StatusOK, `{"status":"COMPLETE"}`), nil
-	})
-
-	store := state.NewMemoryStore()
-	rows := hubspotRows(3)
-	res, err := dst.Load(context.Background(), rows, store, "pipeline", "hubspot")
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("Connect: %v", err)
 	}
-	if res.Loaded != 3 || res.Skipped != 0 || len(res.Errors) != 0 {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if len(body.Inputs) != 3 {
-		t.Fatalf("expected 3 inputs, got %d", len(body.Inputs))
-	}
-	if body.Inputs[0].IDProperty != "email" || body.Inputs[0].ID != "user-0@example.com" {
-		t.Fatalf("unexpected first input: %+v", body.Inputs[0])
-	}
-	if _, ok := body.Inputs[0].Properties["email"]; ok {
-		t.Fatalf("matchOn field should be excluded from properties: %+v", body.Inputs[0].Properties)
-	}
-	if body.Inputs[0].Properties["revenue"] != "50000" {
-		t.Fatalf("expected stringified revenue, got %q", body.Inputs[0].Properties["revenue"])
-	}
+	return h
 }
 
-func TestHubSpotDestination_Load_AlreadyDelivered(t *testing.T) {
-	ctx := context.Background()
-	var body struct {
-		Inputs []struct {
-			ID string `json:"id"`
-		} `json:"inputs"`
-	}
-
-	dst := newHubSpotDestinationForTest(t, "https://api.hubapi.com")
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		payload, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
+// TestHubSpot_NoDestinationID_SearchEmpty_Creates verifies the new-contact path:
+// no stored destination_id + search returns 0 results → POST create.
+func TestHubSpot_NoDestinationID_SearchEmpty_Creates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/search"):
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(HubSpotContact{ID: "hs_001"})
+		default:
+			http.NotFound(w, r)
 		}
-		if err := json.Unmarshal(payload, &body); err != nil {
-			t.Fatalf("json.Unmarshal() error = %v", err)
-		}
-		return newResponse(http.StatusOK, `{"status":"COMPLETE"}`), nil
-	})
+	}))
+	defer srv.Close()
 
-	store := state.NewMemoryStore()
-	rows := hubspotRows(3)
-	if err := store.MarkDelivered(ctx, rows[1].ID, "pipeline", "hubspot"); err != nil {
-		t.Fatalf("MarkDelivered() error = %v", err)
-	}
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com", "firstname": "Alice"})
 
-	res, err := dst.Load(context.Background(), rows, store, "pipeline", "hubspot")
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if res.Loaded != 2 || res.Skipped != 1 || len(res.Errors) != 0 {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if len(body.Inputs) != 2 {
-		t.Fatalf("expected 2 inputs, got %d", len(body.Inputs))
-	}
-}
-
-func TestHubSpotDestination_Load_Batch100(t *testing.T) {
-	var calls int32
-	var batchSizes []int
-	var mu sync.Mutex
-
-	dst := newHubSpotDestinationForTest(t, "https://api.hubapi.com")
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		atomic.AddInt32(&calls, 1)
-		var body struct {
-			Inputs []map[string]any `json:"inputs"`
-		}
-		payload, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll() error = %v", err)
-		}
-		if err := json.Unmarshal(payload, &body); err != nil {
-			t.Fatalf("json.Unmarshal() error = %v", err)
-		}
-		mu.Lock()
-		batchSizes = append(batchSizes, len(body.Inputs))
-		mu.Unlock()
-		return newResponse(http.StatusOK, `{"status":"COMPLETE"}`), nil
-	})
-
-	res, err := dst.Load(context.Background(), hubspotRows(150), state.NewMemoryStore(), "pipeline", "hubspot")
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if res.Loaded != 150 || len(res.Errors) != 0 {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
-	}
-	if len(batchSizes) != 2 || batchSizes[0] != 100 || batchSizes[1] != 50 {
-		t.Fatalf("unexpected batch sizes: %v", batchSizes)
-	}
-}
-
-func TestHubSpotDestination_Load_207PartialSuccess(t *testing.T) {
-	dst := newHubSpotDestinationForTest(t, "https://api.hubapi.com")
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusMultiStatus, `{
-			"status":"COMPLETE",
-			"errors":[
-				{"id":"user-1@example.com","message":"duplicate property value"}
-			]
-		}`), nil
-	})
-
-	res, err := dst.Load(context.Background(), hubspotRows(3), state.NewMemoryStore(), "pipeline", "hubspot")
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if res.Loaded != 2 || len(res.Errors) != 1 {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if !strings.Contains(res.Errors[0].Err.Error(), "duplicate property value") {
-		t.Fatalf("unexpected error: %v", res.Errors[0].Err)
-	}
-}
-
-func TestHubSpotDestination_Load_429Retry(t *testing.T) {
-	var calls int32
-	dst := newHubSpotDestinationForTest(t, "https://api.hubapi.com")
-	dst.cfg.Retry = config.RetryConfig{Attempts: 2, BackoffMs: 1, BackoffOn: []int{429}}
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		n := atomic.AddInt32(&calls, 1)
-		if n == 1 {
-			return newResponse(http.StatusTooManyRequests, ""), nil
-		}
-		return newResponse(http.StatusOK, `{"status":"COMPLETE"}`), nil
-	})
-
-	res, err := dst.Load(context.Background(), hubspotRows(2), state.NewMemoryStore(), "pipeline", "hubspot")
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if res.Loaded != 2 || len(res.Errors) != 0 {
-		t.Fatalf("unexpected result: %+v", res)
-	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
-	}
-}
-
-func TestHubSpotDestination_DefaultBaseURL(t *testing.T) {
-	dst := newHubSpotDestinationForTest(t, "")
-	dst.client = newMockClient(func(r *http.Request) (*http.Response, error) {
-		if got := r.URL.String(); !strings.HasPrefix(got, "https://api.hubapi.com/crm/v3/objects/contacts/batch/upsert") {
-			t.Fatalf("unexpected url %q", got)
-		}
-		return newResponse(http.StatusOK, `{"status":"COMPLETE"}`), nil
-	})
-
-	res, err := dst.Load(context.Background(), hubspotRows(1), state.NewMemoryStore(), "pipeline", "hubspot")
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("Load returned fatal error: %v", err)
 	}
 	if res.Loaded != 1 {
-		t.Fatalf("unexpected result: %+v", res)
+		t.Errorf("Loaded=%d want 1", res.Loaded)
+	}
+	if res.DestinationIDs["row1"] != "hs_001" {
+		t.Errorf("DestinationIDs[row1]=%q want hs_001", res.DestinationIDs["row1"])
+	}
+}
+
+// TestHubSpot_NoDestinationID_SearchFoundOne_Patches verifies that when search
+// finds one existing contact, it PATCHes (no create) and persists the found ID.
+func TestHubSpot_NoDestinationID_SearchFoundOne_Patches(t *testing.T) {
+	var patchCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/search"):
+			json.NewEncoder(w).Encode(map[string]any{
+				"results": []any{map[string]any{"id": "hs_existing"}},
+			})
+		case r.Method == http.MethodPatch:
+			patchCalled = true
+			json.NewEncoder(w).Encode(HubSpotContact{ID: "hs_existing"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !patchCalled {
+		t.Error("expected PATCH call for existing contact, but it was not called")
+	}
+	if res.Loaded != 1 {
+		t.Errorf("Loaded=%d want 1", res.Loaded)
+	}
+	if res.DestinationIDs["row1"] != "hs_existing" {
+		t.Errorf("DestinationIDs[row1]=%q want hs_existing", res.DestinationIDs["row1"])
+	}
+}
+
+// TestHubSpot_StoredDestinationID_PatchesDirectly verifies that when a
+// destination_id is already stored, the connector skips search and PATCHes directly.
+func TestHubSpot_StoredDestinationID_PatchesDirectly(t *testing.T) {
+	var searchCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/search") {
+			searchCalled = true
+		}
+		if r.Method == http.MethodPatch {
+			json.NewEncoder(w).Encode(HubSpotContact{ID: "hs_001"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	_ = store.SaveEntityState(context.Background(), &state.EntityState{
+		SyncName:      "sync",
+		Destination:   "hubspot",
+		EntityKey:     "lead_001",
+		DestinationID: "hs_001",
+	})
+
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com", "leadScore": "88"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if searchCalled {
+		t.Error("search should not be called when destination_id is already stored")
+	}
+	if res.Loaded != 1 {
+		t.Errorf("Loaded=%d want 1", res.Loaded)
+	}
+	if res.DestinationIDs["row1"] != "hs_001" {
+		t.Errorf("DestinationIDs[row1]=%q want hs_001", res.DestinationIDs["row1"])
+	}
+}
+
+// TestHubSpot_SearchReturnsMultiple_DLQ verifies that >1 search result produces
+// a duplicate_match row error (DLQ candidate), not a fatal error.
+func TestHubSpot_SearchReturnsMultiple_DLQ(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"results": []any{
+				map[string]any{"id": "hs_001"},
+				map[string]any{"id": "hs_002"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "dupe@example.com"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load returned fatal error: %v", err)
+	}
+	if res.Loaded != 0 || len(res.Errors) != 1 {
+		t.Errorf("Loaded=%d Errors=%d want Loaded=0 Errors=1", res.Loaded, len(res.Errors))
+	}
+	var hs *hsError
+	if !stderrors.As(res.Errors[0].Err, &hs) || hs.class != hsClassDuplicate {
+		t.Errorf("expected duplicate_match error, got: %v", res.Errors[0].Err)
+	}
+}
+
+// TestHubSpot_ValidationError400_DLQ verifies that HTTP 400 (invalid property)
+// returns a row error without aborting the run.
+func TestHubSpot_ValidationError400_DLQ(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/search") {
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Property 'vortara_score' does not exist"})
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load returned fatal error: %v", err)
+	}
+	if res.Loaded != 0 || len(res.Errors) != 1 {
+		t.Errorf("Loaded=%d Errors=%d want Loaded=0 Errors=1", res.Loaded, len(res.Errors))
+	}
+	var hs *hsError
+	if !stderrors.As(res.Errors[0].Err, &hs) || hs.class != hsClassValidation {
+		t.Errorf("expected validation_error, got: %v", res.Errors[0].Err)
+	}
+}
+
+// TestHubSpot_AuthError401_AbortsRun verifies that HTTP 401 returns a fatal
+// top-level error, so the engine aborts the run.
+func TestHubSpot_AuthError401_AbortsRun(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/search") {
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"message": "missing token"})
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rows := []row.Row{
+		hsTestRow("row1", "lead_001", map[string]any{"email": "a@example.com"}),
+		hsTestRow("row2", "lead_002", map[string]any{"email": "b@example.com"}),
+	}
+
+	res, err := h.Load(context.Background(), rows, store, "sync", "hubspot")
+	if err == nil {
+		t.Fatal("expected fatal error for 401, got nil")
+	}
+	var hs *hsError
+	if !stderrors.As(err, &hs) || hs.class != hsClassAuth {
+		t.Errorf("expected auth_failed fatal error, got: %v", err)
+	}
+	if res.Loaded != 0 {
+		t.Errorf("Loaded=%d want 0 (run should have aborted)", res.Loaded)
+	}
+}
+
+// TestHubSpot_RateLimited_Retries verifies that HTTP 429 triggers retry up to
+// maxAttempts, succeeding on the third attempt.
+func TestHubSpot_RateLimited_Retries(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/search") {
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+			return
+		}
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(HubSpotContact{ID: fmt.Sprintf("hs_%d", attempts)})
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil // disable rate limiter so test doesn't wait
+	// Also shorten backoff by temporarily overriding the client timeout.
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Loaded != 1 {
+		t.Errorf("Loaded=%d want 1 (should retry to success)", res.Loaded)
+	}
+	if attempts < 3 {
+		t.Errorf("attempts=%d want >=3", attempts)
+	}
+}
+
+// TestHubSpot_AlreadyDelivered_Skips verifies that a row already in the
+// delivered log does not trigger any HubSpot API call.
+func TestHubSpot_AlreadyDelivered_Skips(t *testing.T) {
+	var apiCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	_ = store.MarkDelivered(context.Background(), "row1", "sync", "hubspot")
+
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"email": "alice@example.com"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if apiCalled {
+		t.Error("HubSpot API should not be called for an already-delivered row")
+	}
+	if res.Skipped != 1 {
+		t.Errorf("Skipped=%d want 1", res.Skipped)
+	}
+}
+
+// TestHubSpot_MissingMatchOnField_DLQ verifies that a row with no email field
+// produces a row error without any API call.
+func TestHubSpot_MissingMatchOnField_DLQ(t *testing.T) {
+	var apiCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := hsTestRow("row1", "lead_001", map[string]any{"firstname": "No Email"})
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if apiCalled {
+		t.Error("HubSpot API should not be called when match_on field is missing")
+	}
+	if len(res.Errors) != 1 {
+		t.Errorf("Errors=%d want 1", len(res.Errors))
 	}
 }

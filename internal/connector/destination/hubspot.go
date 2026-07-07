@@ -7,36 +7,75 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	httpauth "github.com/rkshvish/vortara/internal/connector/http"
-	vlogger "github.com/rkshvish/vortara/internal/logger"
 	"github.com/rkshvish/vortara/internal/registry"
 	"github.com/rkshvish/vortara/internal/state"
 	"github.com/rkshvish/vortara/pkg/config"
 	"github.com/rkshvish/vortara/pkg/row"
 )
 
-const hubspotDefaultBaseURL = "https://api.hubapi.com"
+const hsDefaultBaseURL = "https://api.hubapi.com"
 
-// HubSpotDestination writes rows to HubSpot CRM using the batch upsert API.
+// hsClass classifies a HubSpot API error so callers can decide
+// whether to DLQ, retry, or abort the run.
+type hsClass string
+
+const (
+	hsClassAuth       hsClass = "auth_failed"      // 401/403 — abort run
+	hsClassValidation hsClass = "validation_error" // 400/422 — terminal, DLQ
+	hsClassConflict   hsClass = "conflict"         // 409     — DLQ
+	hsClassDuplicate  hsClass = "duplicate_match"  // search returned >1 contact
+	hsClassRetryable  hsClass = "retryable"        // 429/5xx — retry then DLQ
+	hsClassAmbiguous  hsClass = "ambiguous"        // timeout — do not mark success
+)
+
+type hsError struct {
+	class   hsClass
+	status  int
+	message string
+}
+
+func (e *hsError) Error() string {
+	if e.status != 0 {
+		return fmt.Sprintf("hubspot %s (HTTP %d): %s", e.class, e.status, e.message)
+	}
+	return fmt.Sprintf("hubspot %s: %s", e.class, e.message)
+}
+
+// HubSpotContact is a minimal representation of a HubSpot contact API response.
+type HubSpotContact struct {
+	ID string `json:"id"`
+}
+
+// HubSpotDestination writes contacts to HubSpot using the safe
+// Resolve → Mutate → Record single-record flow:
+//
+//  1. Check for a stored destination_id in entity state.
+//  2. If found: PATCH directly by ID.
+//  3. If not found: search by match_on field.
+//  4. One result → PATCH and persist the ID.
+//  5. Zero results → POST create and persist the returned ID.
+//  6. Multiple results → DLQ (duplicate_match — operator review required).
 type HubSpotDestination struct {
-	cfg              config.DestinationConfig
-	auth             httpauth.Authenticator
-	rateLimiter      *httpauth.RateLimiter
-	breaker          *httpauth.CircuitBreaker
-	client           *http.Client
-	baseURL          string
-	object           string
-	matchOn          string
-	writeParallelism int
+	cfg     config.DestinationConfig
+	auth    httpauth.Authenticator
+	rl      *httpauth.RateLimiter
+	client  *http.Client
+	baseURL string
+	object  string // "contacts"
+	matchOn string // "email"
 }
 
 var _ Destination = (*HubSpotDestination)(nil)
+
+// NewHubSpotDestination returns a new HubSpotDestination.
+func NewHubSpotDestination() *HubSpotDestination {
+	return &HubSpotDestination{}
+}
 
 func init() {
 	registry.RegisterDestination("hubspot", func() any {
@@ -44,417 +83,335 @@ func init() {
 	})
 }
 
-// NewHubSpotDestination returns a new HubSpotDestination.
-func NewHubSpotDestination() *HubSpotDestination {
-	return &HubSpotDestination{
-		client: &http.Client{Timeout: 30 * time.Second},
+// Connect validates config and initialises the HTTP client and rate limiter.
+func (h *HubSpotDestination) Connect(_ context.Context, cfg config.DestinationConfig) error {
+	if strings.TrimSpace(cfg.Auth.Token) == "" {
+		return errors.New("hubspot: auth.token is required (use a private app token)")
 	}
-}
 
-// Connect validates HubSpot settings and initializes shared HTTP helpers.
-func (h *HubSpotDestination) Connect(ctx context.Context, cfg config.DestinationConfig) error {
-	if strings.TrimSpace(cfg.Options["object"]) == "" {
-		return errors.New("hubspot destination: options.object is required")
+	object := strings.TrimSpace(cfg.Options["object"])
+	if object == "" {
+		object = "contacts"
 	}
-	if strings.TrimSpace(cfg.MatchOn) == "" {
-		return errors.New("hubspot destination: match_on is required")
+	// MatchOn is comma-separated; take the first field (typically "email").
+	matchOn := strings.TrimSpace(strings.SplitN(cfg.MatchOn, ",", 2)[0])
+	if matchOn == "" {
+		matchOn = "email"
 	}
 
 	auth, err := httpauth.NewAuthenticator(cfg.Auth)
 	if err != nil {
 		return err
 	}
-	rl, err := httpauth.NewRateLimiter(cfg.RateLimit)
+
+	// Default: 5 req/sec (conservative for private apps on any tier).
+	rlCfg := cfg.RateLimit
+	if rlCfg.Requests == 0 {
+		rlCfg = config.RateLimitConfig{Requests: 5, Period: "1s"}
+	}
+	rl, err := httpauth.NewRateLimiter(rlCfg)
 	if err != nil {
 		return err
-	}
-	cb := httpauth.NewCircuitBreaker(cfg.CircuitBreaker)
-	if cfg.WriteParallelism <= 0 {
-		cfg.WriteParallelism = 3
-	}
-	transport := &http.Transport{
-		ForceAttemptHTTP2:   true,
-		MaxIdleConns:        cfg.WriteParallelism * 2,
-		MaxIdleConnsPerHost: cfg.WriteParallelism,
-		MaxConnsPerHost:     cfg.WriteParallelism,
-		IdleConnTimeout:     90 * time.Second,
 	}
 
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.URL), "/")
 	if baseURL == "" {
-		baseURL = hubspotDefaultBaseURL
+		baseURL = hsDefaultBaseURL
 	}
 
 	h.cfg = cfg
 	h.auth = auth
-	h.rateLimiter = rl
-	h.breaker = cb
-	h.writeParallelism = cfg.WriteParallelism
-	h.client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	h.rl = rl
+	h.client = &http.Client{Timeout: 30 * time.Second}
 	h.baseURL = baseURL
-	h.object = cfg.Options["object"]
-	h.matchOn = cfg.MatchOn
+	h.object = object
+	h.matchOn = matchOn
 	return nil
 }
 
-// Load writes rows to HubSpot in batches of up to 100 using batch upsert.
+// Load delivers rows one at a time. Each row goes through Resolve → Mutate → Record.
+// On fatal auth errors (401/403) the run is aborted immediately via the returned error.
+// All other per-row failures are collected in LoadResult.Errors for DLQ handling.
 func (h *HubSpotDestination) Load(ctx context.Context, rows []row.Row, store state.StateStore, pipeline, destName string) (LoadResult, error) {
 	var result LoadResult
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if len(rows) == 0 {
-		return result, nil
-	}
-	if h.client == nil {
-		h.client = &http.Client{Timeout: 30 * time.Second}
-	}
 
-	batches := make([][]row.Row, 0, (len(rows)+99)/100)
-	for start := 0; start < len(rows); start += 100 {
-		end := start + 100
-		if end > len(rows) {
-			end = len(rows)
+	for _, rw := range rows {
+		if err := ctx.Err(); err != nil {
+			return result, err
 		}
-		batches = append(batches, rows[start:end])
-	}
 
-	if len(batches) == 0 {
-		return result, nil
-	}
-
-	if len(batches) > 2 && h.writeParallelism > 1 {
-		return h.loadBatchesParallel(ctx, batches, store, pipeline, destName)
-	}
-
-	for _, batch := range batches {
-		pending := make([]row.Row, 0, len(batch))
-		for _, rw := range batch {
-			delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
-			if err != nil {
-				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
-				continue
-			}
-			if delivered {
-				result.Skipped++
-				continue
-			}
-			if _, ok := rw.Data[h.matchOn]; !ok {
-				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: fmt.Errorf("hubspot destination: missing %s", h.matchOn)})
-				continue
-			}
-			pending = append(pending, rw)
-		}
-		batchResult, err := h.processPendingBatch(ctx, pending, store, pipeline, destName)
+		// Idempotency: skip if this delivery key was already recorded as delivered.
+		delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return result, ctx.Err()
-			}
-			for _, rw := range pending {
-				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
-			}
+			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
 		}
-		result.Loaded += batchResult.Loaded
-		result.Skipped += batchResult.Skipped
-		result.Errors = append(result.Errors, batchResult.Errors...)
-	}
+		if delivered {
+			result.Skipped++
+			continue
+		}
 
-	return result, nil
-}
-
-// Close releases HubSpot connector resources.
-func (h *HubSpotDestination) Close() error {
-	if h.rateLimiter != nil {
-		h.rateLimiter.Stop()
-	}
-	return nil
-}
-
-func (h *HubSpotDestination) loadBatchesParallel(ctx context.Context, batches [][]row.Row, store state.StateStore, pipeline, destName string) (LoadResult, error) {
-	var result LoadResult
-	parallelism := h.writeParallelism
-	if parallelism <= 0 {
-		parallelism = 1
-	}
-	sem := make(chan struct{}, parallelism)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for _, batch := range batches {
-		batch := batch
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			pending := make([]row.Row, 0, len(batch))
-			var skipped int
-			var batchErrors []RowError
-			for _, rw := range batch {
-				delivered, err := store.IsDelivered(ctx, rw.ID, pipeline, destName)
-				if err != nil {
-					batchErrors = append(batchErrors, RowError{RowID: rw.ID, Row: rw, Err: err})
-					continue
-				}
-				if delivered {
-					skipped++
-					continue
-				}
-				if _, ok := rw.Data[h.matchOn]; !ok {
-					batchErrors = append(batchErrors, RowError{RowID: rw.ID, Row: rw, Err: fmt.Errorf("hubspot destination: missing %s", h.matchOn)})
-					continue
-				}
-				pending = append(pending, rw)
-			}
-			if len(pending) == 0 {
-				mu.Lock()
-				result.Skipped += skipped
-				result.Errors = append(result.Errors, batchErrors...)
-				mu.Unlock()
-				return
-			}
-
-			successIDs, failed, err := h.upsertBatch(ctx, destName, pending)
-			mu.Lock()
-			defer mu.Unlock()
-			result.Skipped += skipped
-			result.Errors = append(result.Errors, batchErrors...)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					result.Errors = append(result.Errors, RowError{Err: err})
-					return
-				}
-				for _, rw := range pending {
-					result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
-				}
-				return
-			}
-
-			for _, rw := range pending {
-				matchID := fmt.Sprintf("%v", rw.Data[h.matchOn])
-				if rowErr, ok := failed[matchID]; ok {
-					result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: rowErr})
-					continue
-				}
-				if successIDs != nil {
-					if _, ok := successIDs[matchID]; !ok {
-						result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: errors.New("hubspot destination: row missing from successful results")})
-						continue
-					}
-				}
-				if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
-					result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
-					continue
-				}
-				result.Loaded++
-			}
-		}()
-	}
-	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
-func (h *HubSpotDestination) processPendingBatch(ctx context.Context, pending []row.Row, store state.StateStore, pipeline, destName string) (LoadResult, error) {
-	var result LoadResult
-	if len(pending) == 0 {
-		return result, nil
-	}
-
-	successIDs, failed, err := h.upsertBatch(ctx, destName, pending)
-	if err != nil {
-		return result, err
-	}
-
-	for _, rw := range pending {
-		matchID := fmt.Sprintf("%v", rw.Data[h.matchOn])
-		if rowErr, ok := failed[matchID]; ok {
+		destID, rowErr, fatalErr := h.deliver(ctx, rw, store, pipeline, destName)
+		if fatalErr != nil {
+			// 401/403: no point continuing — every subsequent request will also fail.
+			return result, fatalErr
+		}
+		if rowErr != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: rowErr})
 			continue
 		}
-		if successIDs != nil {
-			if _, ok := successIDs[matchID]; !ok {
-				result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: errors.New("hubspot destination: row missing from successful results")})
-				continue
-			}
-		}
+
 		if err := store.MarkDelivered(ctx, rw.ID, pipeline, destName); err != nil {
 			result.Errors = append(result.Errors, RowError{RowID: rw.ID, Row: rw, Err: err})
 			continue
+		}
+		if destID != "" {
+			if result.DestinationIDs == nil {
+				result.DestinationIDs = make(map[string]string)
+			}
+			result.DestinationIDs[rw.ID] = destID
 		}
 		result.Loaded++
 	}
 	return result, nil
 }
 
-func (h *HubSpotDestination) upsertBatch(ctx context.Context, destName string, rows []row.Row) (map[string]struct{}, map[string]error, error) {
-	payload, err := h.buildBatchPayload(rows)
-	if err != nil {
-		return nil, nil, err
+// deliver runs the Resolve → Mutate → Record flow for a single row.
+// Returns (hubspotContactID, rowError, fatalError).
+// fatalError is non-nil only for 401/403 — it aborts the entire run.
+func (h *HubSpotDestination) deliver(
+	ctx context.Context,
+	rw row.Row,
+	store state.StateStore,
+	pipeline, destName string,
+) (destID string, rowErr error, fatalErr error) {
+	// Build HubSpot properties map: all mapped fields, values stringified.
+	props := make(map[string]string, len(rw.Data))
+	for k, v := range rw.Data {
+		if v == nil {
+			continue
+		}
+		props[k] = fmt.Sprintf("%v", v)
 	}
 
-	endpoint := fmt.Sprintf("%s/crm/v3/objects/%s/batch/upsert", h.baseURL, h.object)
-	var successIDs map[string]struct{}
-	var failed map[string]error
+	// Resolve: check for a stored HubSpot contact ID in entity state.
+	es, _ := store.GetEntityState(ctx, pipeline, destName, rw.PrimaryKey)
+	storedID := ""
+	if es != nil {
+		storedID = es.DestinationID
+	}
 
-	err = httpauth.DoWithRetry(ctx, h.cfg.Retry, func() (int, error) {
+	var hubspotID string
+
+	if storedID != "" {
+		// Fast path: PATCH directly by stored ID — no search needed.
+		if err := h.updateContact(ctx, storedID, props); err != nil {
+			return h.classifyErr(err)
+		}
+		hubspotID = storedID
+	} else {
+		// Resolve path: search by matchOn field (typically email).
+		matchVal, ok := rw.Data[h.matchOn]
+		if !ok || matchVal == nil || fmt.Sprintf("%v", matchVal) == "" {
+			return "", fmt.Errorf("hubspot: match_on field %q is empty for entity %q", h.matchOn, rw.PrimaryKey), nil
+		}
+
+		found, isDuplicate, err := h.searchByField(ctx, h.matchOn, fmt.Sprintf("%v", matchVal))
+		if err != nil {
+			return h.classifyErr(err)
+		}
+		if isDuplicate {
+			return "", &hsError{
+				class: hsClassDuplicate,
+				message: fmt.Sprintf(
+					"search by %s=%q returned multiple contacts — operator review required",
+					h.matchOn, matchVal,
+				),
+			}, nil
+		}
+
+		if found != "" {
+			// One contact found: patch it and remember the ID.
+			if err := h.updateContact(ctx, found, props); err != nil {
+				return h.classifyErr(err)
+			}
+			hubspotID = found
+		} else {
+			// No contact found: create it.
+			created, err := h.createContact(ctx, props)
+			if err != nil {
+				return h.classifyErr(err)
+			}
+			hubspotID = created
+		}
+	}
+
+	return hubspotID, nil, nil
+}
+
+// classifyErr maps a *hsError into (destID, rowErr, fatalErr).
+// Auth errors abort the run; all others become row-level DLQ candidates.
+func (h *HubSpotDestination) classifyErr(err error) (string, error, error) {
+	var hs *hsError
+	if errors.As(err, &hs) && hs.class == hsClassAuth {
+		return "", nil, err
+	}
+	return "", err, nil
+}
+
+// searchByField queries HubSpot for contacts matching field=value.
+// Returns (id, isDuplicate, err).
+// id is "" when not found. isDuplicate is true when 2+ contacts matched.
+func (h *HubSpotDestination) searchByField(ctx context.Context, field, value string) (string, bool, error) {
+	body, _ := json.Marshal(map[string]any{
+		"filterGroups": []map[string]any{
+			{"filters": []map[string]any{
+				{"propertyName": field, "operator": "EQ", "value": value},
+			}},
+		},
+		"properties": []string{field},
+		"limit":      2, // only need to know: 0, 1, or ≥2
+	})
+
+	endpoint := fmt.Sprintf("%s/crm/v3/objects/%s/search", h.baseURL, h.object)
+
+	var result struct {
+		Results []HubSpotContact `json:"results"`
+	}
+	if err := h.doWithRetry(ctx, http.MethodPost, endpoint, body, &result); err != nil {
+		return "", false, err
+	}
+
+	switch len(result.Results) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return result.Results[0].ID, false, nil
+	default:
+		return "", true, nil
+	}
+}
+
+// createContact creates a new HubSpot contact and returns its ID.
+func (h *HubSpotDestination) createContact(ctx context.Context, props map[string]string) (string, error) {
+	body, _ := json.Marshal(map[string]any{"properties": props})
+	endpoint := fmt.Sprintf("%s/crm/v3/objects/%s", h.baseURL, h.object)
+	var result HubSpotContact
+	if err := h.doWithRetry(ctx, http.MethodPost, endpoint, body, &result); err != nil {
+		return "", err
+	}
+	return result.ID, nil
+}
+
+// updateContact patches an existing HubSpot contact by ID.
+func (h *HubSpotDestination) updateContact(ctx context.Context, id string, props map[string]string) error {
+	body, _ := json.Marshal(map[string]any{"properties": props})
+	endpoint := fmt.Sprintf("%s/crm/v3/objects/%s/%s", h.baseURL, h.object, id)
+	return h.doWithRetry(ctx, http.MethodPatch, endpoint, body, nil)
+}
+
+// doWithRetry executes an HTTP request, retrying on 429/5xx up to 3 times.
+// Terminal errors (400/422/409/401/403) are returned immediately without retry.
+// Timeouts and network errors are returned as hsClassAmbiguous — the caller
+// must NOT mark state as success for ambiguous outcomes.
+func (h *HubSpotDestination) doWithRetry(ctx context.Context, method, url string, body []byte, out any) error {
+	const maxAttempts = 3
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return &hsError{class: hsClassAmbiguous, message: err.Error()}
 		}
-		if err := h.allowRequest(ctx, destName); err != nil {
-			return 0, err
-		}
-		if h.rateLimiter != nil {
-			if err := h.rateLimiter.Wait(ctx); err != nil {
-				return 0, err
+		if h.rl != nil {
+			if err := h.rl.Wait(ctx); err != nil {
+				return &hsError{class: hsClassAmbiguous, message: err.Error()}
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 		if err != nil {
-			return 0, err
+			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		if h.auth != nil {
 			if err := h.auth.Apply(req); err != nil {
-				return 0, err
+				return err
 			}
 		}
 
 		resp, err := h.client.Do(req)
 		if err != nil {
-			h.recordCircuitFailure(ctx, destName)
-			return 0, err
+			// Network error or timeout. For mutating requests we don't know if
+			// the request landed, so treat as ambiguous — never mark success.
+			return &hsError{class: hsClassAmbiguous, message: err.Error()}
 		}
-		defer resp.Body.Close()
-		h.recordCircuitResponse(ctx, destName, resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
 
-		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusMultiStatus {
-			successIDs, failed, err = parseHubSpotResponse(resp.Body)
-			if err != nil {
-				return resp.StatusCode, err
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if out != nil && len(respBody) > 0 {
+				if err := json.Unmarshal(respBody, out); err != nil {
+					return fmt.Errorf("hubspot: decode response: %w", err)
+				}
+			}
+			return nil
+		}
+
+		msg := hsReadMessage(respBody)
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized:
+			return &hsError{class: hsClassAuth, status: resp.StatusCode, message: "invalid or missing private app token"}
+		case resp.StatusCode == http.StatusForbidden:
+			return &hsError{class: hsClassAuth, status: resp.StatusCode, message: "token lacks required scope"}
+		case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == 422:
+			return &hsError{class: hsClassValidation, status: resp.StatusCode, message: msg}
+		case resp.StatusCode == http.StatusConflict:
+			return &hsError{class: hsClassConflict, status: resp.StatusCode, message: msg}
+		default:
+			// 429 or 5xx: retryable.
+			lastErr = &hsError{class: hsClassRetryable, status: resp.StatusCode, message: msg}
+		}
+
+		if attempt < maxAttempts-1 {
+			backoff := time.Duration(1<<attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return &hsError{class: hsClassAmbiguous, message: ctx.Err().Error()}
+			case <-time.After(backoff):
 			}
 		}
-		return resp.StatusCode, nil
-	})
-	if err != nil {
-		return nil, nil, err
 	}
-	return successIDs, failed, nil
+	return lastErr
 }
 
-func (h *HubSpotDestination) allowRequest(ctx context.Context, destination string) error {
-	if h.breaker == nil {
-		return nil
+// hsReadMessage extracts a human-readable error string from a HubSpot response body.
+func hsReadMessage(body []byte) string {
+	var payload struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
 	}
-	before := h.breaker.State()
-	if err := h.breaker.Allow(); err != nil {
-		vlogger.WithDestination(vlogger.FromContext(ctx), destination).Warn("circuit breaker open, skipping request",
-			slog.String("destination", destination),
-		)
-		return err
+	if json.Unmarshal(body, &payload) == nil {
+		if payload.Message != "" {
+			return payload.Message
+		}
+		if payload.Error != "" {
+			return payload.Error
+		}
 	}
-	if before == "open" && h.breaker.State() == "half_open" {
-		vlogger.WithDestination(vlogger.FromContext(ctx), destination).Info("circuit breaker half-open, testing",
-			slog.String("destination", destination),
-		)
+	msg := strings.TrimSpace(string(body))
+	if len(msg) > 200 {
+		return msg[:200] + "..."
+	}
+	return msg
+}
+
+// Close releases rate limiter resources.
+func (h *HubSpotDestination) Close() error {
+	if h.rl != nil {
+		h.rl.Stop()
 	}
 	return nil
-}
-
-func (h *HubSpotDestination) recordCircuitFailure(ctx context.Context, destination string) {
-	if h.breaker == nil {
-		return
-	}
-	before := h.breaker.State()
-	h.breaker.RecordFailure()
-	if before != "open" && h.breaker.State() == "open" {
-		vlogger.WithDestination(vlogger.FromContext(ctx), destination).Error("circuit breaker opened",
-			slog.String("destination", destination),
-			slog.Int("failures", h.cfg.CircuitBreaker.Threshold),
-		)
-	}
-}
-
-func (h *HubSpotDestination) recordCircuitResponse(ctx context.Context, destination string, statusCode int) {
-	if h.breaker == nil {
-		return
-	}
-	before := h.breaker.State()
-	if statusCode >= http.StatusInternalServerError {
-		h.recordCircuitFailure(ctx, destination)
-		return
-	}
-	h.breaker.RecordSuccess()
-	if before == "half_open" && h.breaker.State() == "closed" {
-		vlogger.WithDestination(vlogger.FromContext(ctx), destination).Info("circuit breaker closed, destination recovered",
-			slog.String("destination", destination),
-		)
-	}
-}
-
-func (h *HubSpotDestination) buildBatchPayload(rows []row.Row) ([]byte, error) {
-	type hubspotInput struct {
-		IDProperty string            `json:"idProperty"`
-		ID         string            `json:"id"`
-		Properties map[string]string `json:"properties"`
-	}
-	inputs := make([]hubspotInput, 0, len(rows))
-	for _, rw := range rows {
-		props := make(map[string]string, len(rw.Data))
-		for k, v := range rw.Data {
-			if k == h.matchOn {
-				continue
-			}
-			props[k] = fmt.Sprintf("%v", v)
-		}
-		inputs = append(inputs, hubspotInput{
-			IDProperty: h.matchOn,
-			ID:         fmt.Sprintf("%v", rw.Data[h.matchOn]),
-			Properties: props,
-		})
-	}
-	return json.Marshal(map[string]any{"inputs": inputs})
-}
-
-func parseHubSpotResponse(body io.Reader) (map[string]struct{}, map[string]error, error) {
-	var payload struct {
-		Results []struct {
-			ID string `json:"id"`
-		} `json:"results"`
-		Errors []struct {
-			ID      string `json:"id"`
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return nil, nil, err
-	}
-
-	var successIDs map[string]struct{}
-	if len(payload.Results) > 0 {
-		successIDs = make(map[string]struct{}, len(payload.Results))
-		for _, res := range payload.Results {
-			if strings.TrimSpace(res.ID) == "" {
-				continue
-			}
-			successIDs[res.ID] = struct{}{}
-		}
-	}
-
-	failed := make(map[string]error, len(payload.Errors))
-	for _, rowErr := range payload.Errors {
-		if strings.TrimSpace(rowErr.ID) == "" {
-			continue
-		}
-		msg := strings.TrimSpace(rowErr.Message)
-		if msg == "" {
-			msg = "hubspot destination: upsert failed"
-		}
-		failed[rowErr.ID] = errors.New(msg)
-	}
-	return successIDs, failed, nil
 }
