@@ -202,7 +202,11 @@ func runDiff(_ *cobra.Command, args []string) error {
 				threshold = 1
 			}
 			if consecutive >= threshold {
-				action = "would-" + s.OnMissingFrom.Action
+				verb := s.OnMissingFrom.Action
+				if verb == "delete" && isArchiveDestination(s.Destination.Type) {
+					verb = "archive"
+				}
+				action = "would-" + verb
 			} else {
 				action = fmt.Sprintf("missing (%d/%d runs)", consecutive, threshold)
 			}

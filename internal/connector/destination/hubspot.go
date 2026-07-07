@@ -188,6 +188,25 @@ func (h *HubSpotDestination) deliver(
 	store state.StateStore,
 	pipeline, destName string,
 ) (destID string, rowErr error, fatalErr error) {
+	// Resolve: check for a stored HubSpot contact ID in entity state.
+	es, _ := store.GetEntityState(ctx, pipeline, destName, rw.PrimaryKey)
+	storedID := ""
+	if es != nil {
+		storedID = es.DestinationID
+	}
+
+	// Delete path: engine signals this via Metadata["_action"] = "delete".
+	if action, _ := rw.Metadata["_action"].(string); action == "delete" {
+		if storedID == "" {
+			// No destination ID stored — nothing to archive; treat as success.
+			return "", nil, nil
+		}
+		if err := h.archiveContact(ctx, storedID); err != nil {
+			return h.classifyErr(err)
+		}
+		return storedID, nil, nil
+	}
+
 	// Build HubSpot properties map: all mapped fields, values stringified.
 	props := make(map[string]string, len(rw.Data))
 	for k, v := range rw.Data {
@@ -195,13 +214,6 @@ func (h *HubSpotDestination) deliver(
 			continue
 		}
 		props[k] = fmt.Sprintf("%v", v)
-	}
-
-	// Resolve: check for a stored HubSpot contact ID in entity state.
-	es, _ := store.GetEntityState(ctx, pipeline, destName, rw.PrimaryKey)
-	storedID := ""
-	if es != nil {
-		storedID = es.DestinationID
 	}
 
 	var hubspotID string
@@ -313,6 +325,12 @@ func (h *HubSpotDestination) updateContact(ctx context.Context, id string, props
 	return h.doWithRetry(ctx, http.MethodPatch, endpoint, body, nil)
 }
 
+// archiveContact soft-deletes (archives) a HubSpot object by ID.
+func (h *HubSpotDestination) archiveContact(ctx context.Context, id string) error {
+	endpoint := fmt.Sprintf("%s/crm/v3/objects/%s/%s", h.baseURL, h.object, id)
+	return h.doWithRetry(ctx, http.MethodDelete, endpoint, nil, nil)
+}
+
 // doWithRetry executes an HTTP request, retrying on 429/5xx up to 3 times.
 // Terminal errors (400/422/409/401/403) are returned immediately without retry.
 // Timeouts and network errors are returned as hsClassAmbiguous — the caller
@@ -331,7 +349,11 @@ func (h *HubSpotDestination) doWithRetry(ctx context.Context, method, url string
 			}
 		}
 
-		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+		var bodyReader io.Reader
+		if len(body) > 0 {
+			bodyReader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 		if err != nil {
 			return err
 		}

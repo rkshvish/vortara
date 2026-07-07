@@ -521,6 +521,8 @@ func (e *Engine) processMissingEntities(
 		threshold = 1
 	}
 
+	deleteCount := 0
+
 	const pageSize = 500
 	offset := 0
 	for {
@@ -542,11 +544,32 @@ func (e *Engine) processMissingEntities(
 			action := strings.ToLower(s.OnMissingFrom.Action)
 			switch action {
 			case "delete":
+				// Guard: require explicit opt-in before sending any destructive request.
+				if !s.OnMissingFrom.AllowDestructive {
+					l.Warn("archive skipped: set on_missing_from_source.allow_destructive_actions: true to enable",
+						slog.String("sync", s.Name),
+						slog.String("entity", es.EntityKey),
+					)
+					es.UpdatedAt = time.Now().UTC()
+					_ = e.store.SaveEntityState(ctx, es)
+					continue
+				}
+				// Guard: max_deletes_per_run blast-radius limit.
+				if s.Safety.MaxDeletesPerRun > 0 && deleteCount >= s.Safety.MaxDeletesPerRun {
+					l.Warn("max_deletes_per_run reached, skipping remaining deletes",
+						slog.String("sync", s.Name),
+						slog.Int("limit", s.Safety.MaxDeletesPerRun),
+					)
+					es.UpdatedAt = time.Now().UTC()
+					_ = e.store.SaveEntityState(ctx, es)
+					continue
+				}
 				if dest != nil {
 					deliveryRow := row.Row{
 						ID:         es.EntityKey,
 						PrimaryKey: es.EntityKey,
 						Data:       es.CurrentPayload,
+						Metadata:   map[string]any{"_action": "delete"},
 					}
 					res, loadErr := dest.Load(ctx, []row.Row{deliveryRow}, e.store, s.Name, destName)
 					stats.RowsLoaded += res.Loaded
@@ -555,6 +578,8 @@ func (e *Engine) processMissingEntities(
 						if dlq.Enabled() {
 							_ = dlq.Write(deliveryRow, es.EntityKey, loadErr)
 						}
+					} else {
+						deleteCount++
 					}
 				}
 				_ = e.store.RecordDecision(ctx, &state.DecisionEvent{

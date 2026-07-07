@@ -33,6 +33,18 @@ func Execute() {
 	}
 }
 
+// isArchiveDestination returns true for destinations that soft-archive records
+// rather than hard-delete them, so the CLI can show [would-archive] instead of
+// [would-delete] in diff output and explain output.
+func isArchiveDestination(destType string) bool {
+	switch destType {
+	case "hubspot":
+		return true
+	default:
+		return false
+	}
+}
+
 func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(validateCmd)

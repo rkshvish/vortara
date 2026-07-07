@@ -346,6 +346,86 @@ func TestHubSpot_AlreadyDelivered_Skips(t *testing.T) {
 	}
 }
 
+// TestHubSpot_Delete_Archives verifies that a row with Metadata["_action"]="delete"
+// and a stored destination_id sends DELETE to HubSpot and succeeds.
+func TestHubSpot_Delete_Archives(t *testing.T) {
+	var deleteCalled bool
+	var deletePath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+			deletePath = r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	_ = store.SaveEntityState(context.Background(), &state.EntityState{
+		SyncName:      "sync",
+		Destination:   "hubspot",
+		EntityKey:     "lead_001",
+		DestinationID: "hs_archive_001",
+	})
+
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := row.Row{
+		ID:         "lead_001",
+		PrimaryKey: "lead_001",
+		Data:       map[string]any{"email": "alice@example.com"},
+		Metadata:   map[string]any{"_action": "delete"},
+	}
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !deleteCalled {
+		t.Error("expected DELETE request to HubSpot, but it was not called")
+	}
+	if !strings.Contains(deletePath, "hs_archive_001") {
+		t.Errorf("DELETE path %q should contain the stored hs_archive_001 ID", deletePath)
+	}
+	if res.Loaded != 1 {
+		t.Errorf("Loaded=%d want 1", res.Loaded)
+	}
+}
+
+// TestHubSpot_Delete_NoStoredID_Skips verifies that a delete action with no
+// stored destination_id succeeds without any API call (nothing to archive).
+func TestHubSpot_Delete_NoStoredID_Skips(t *testing.T) {
+	var apiCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	store := newHSTestStore()
+	h := connectHS(t, srv.URL)
+	h.rl = nil
+	rw := row.Row{
+		ID:         "lead_999",
+		PrimaryKey: "lead_999",
+		Data:       map[string]any{"email": "ghost@example.com"},
+		Metadata:   map[string]any{"_action": "delete"},
+	}
+
+	res, err := h.Load(context.Background(), []row.Row{rw}, store, "sync", "hubspot")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if apiCalled {
+		t.Error("HubSpot API should not be called when there is no stored destination_id to archive")
+	}
+	if res.Loaded != 1 {
+		t.Errorf("Loaded=%d want 1", res.Loaded)
+	}
+}
+
 // TestHubSpot_MissingMatchOnField_DLQ verifies that a row with no email field
 // produces a row error without any API call.
 func TestHubSpot_MissingMatchOnField_DLQ(t *testing.T) {

@@ -136,7 +136,7 @@ A sync spec has four sections:
 
 **Decisions** — rules that evaluate the current row against remembered state. First match wins. Default is `skip`.
 
-**Destination** — where to deliver the payload (`restapi` today; HubSpot and Salesforce are planned).
+**Destination** — where to deliver the payload (`restapi` and `hubspot` today; Salesforce is planned).
 
 ```yaml
 sync:
@@ -213,9 +213,9 @@ vortara validate sync.yaml          # parse and validate config — no connectio
 vortara test sync.yaml              # run inline state tests (no live source needed)
 vortara diff sync.yaml              # show what would change without delivering
 vortara run sync.yaml               # deliver all pending decisions
-vortara explain sync.yaml --key ID  # explain the decision for one entity
+vortara explain sync.yaml --key ID  # explain the decision for one entity (works for missing entities too)
 vortara dlq list sync.yaml          # show failed deliveries
-vortara replay sync.yaml --dlq      # re-deliver failed rows from the DLQ
+vortara replay sync.yaml            # re-deliver failed rows from the DLQ
 vortara state inspect sync.yaml ID  # show remembered state for one entity
 ```
 
@@ -261,7 +261,7 @@ When a destination returns a configured failure status, the row is written to a 
 
 ```bash
 vortara dlq list sync.yaml
-vortara replay sync.yaml --dlq
+vortara replay sync.yaml
 ```
 
 On successful replay, state is updated to `success`. The next `run` will skip that entity until its data changes again.
@@ -274,9 +274,35 @@ On successful replay, state is updated to `success`. The next `run` will skip th
 safety:
   max_creates_per_run: 500
   max_updates_per_run: 1000
+  max_deletes_per_run: 10      # cap archive/delete operations per run
 ```
 
-A run that would exceed the limit is aborted before any delivery. Use `vortara diff` to preview before running.
+A run that would exceed any limit stops after the last safe delivery — earlier decisions in the same run are not rolled back. Use `vortara diff` to preview before running.
+
+---
+
+## Missing from source
+
+When a source record disappears, Vortara can archive it at the destination:
+
+```yaml
+on_missing_from_source:
+  action: delete               # "skip" (default) | "delete" | "clear_fields"
+  after_missing_runs: 1        # how many consecutive missing runs before acting
+  allow_destructive_actions: true   # required — omit to block all archive requests
+```
+
+For HubSpot, `action: delete` sends a soft-archive request (`DELETE /crm/v3/objects/contacts/{id}`). The contact is not permanently destroyed and can be restored. See [Restoring archived HubSpot contacts](docs/hubspot-restore.md).
+
+`vortara diff` shows `[would-archive]` for HubSpot (not `[would-delete]`) to reflect that the operation is reversible. `vortara explain` shows the archive decision with the stored HubSpot contact ID:
+
+```
+Decision: ARCHIVE
+Reason:   missing from source for 1 run(s)
+Destination: Hubspot contact 515388171988
+```
+
+If `allow_destructive_actions` is not set, Vortara logs a warning and skips the archive without touching the destination.
 
 ---
 
@@ -286,6 +312,7 @@ A run that would exceed the limit is aborted before any delivery. Use `vortara d
 - [State model](docs/state-model.md)
 - [Decision rules](docs/decision-rules.md)
 - [DLQ and replay](docs/dlq-replay.md)
+- [Restoring archived HubSpot contacts](docs/hubspot-restore.md)
 - [Demo walkthrough](docs/examples/rest-webhook-demo.md)
 - [Demo transcript](docs/demo-transcript.md)
 
@@ -293,7 +320,7 @@ A run that would exceed the limit is aborted before any delivery. Use `vortara d
 
 ## Roadmap
 
-- [ ] HubSpot contacts destination
+- [x] HubSpot contacts destination (stateful upsert + archive with `allow_destructive_actions` guard)
 - [ ] Postgres state backend (for multi-instance deployments)
 - [ ] Approval gate (`vortara approve`)
 - [ ] Delivery history command

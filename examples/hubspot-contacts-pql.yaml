@@ -50,6 +50,11 @@ sync:
           fingerprint_changed: {}
         action: update
 
+  on_missing_from_source:
+    action: delete
+    after_missing_runs: 1
+    allow_destructive_actions: true
+
   destination:
     type: hubspot
     object: contact
@@ -61,6 +66,7 @@ sync:
   safety:
     max_creates_per_run: 25
     max_updates_per_run: 100
+    max_deletes_per_run: 10
 
   errors:
     on_error: skip

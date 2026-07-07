@@ -178,9 +178,10 @@ type TransitionedConfig struct {
 
 // OnMissingConfig controls behavior for entities absent from the current source snapshot.
 type OnMissingConfig struct {
-	Action           string   `yaml:"action,omitempty"`             // "skip" | "clear_fields" | "delete"
-	Fields           []string `yaml:"fields,omitempty"`             // for clear_fields
-	AfterMissingRuns int      `yaml:"after_missing_runs,omitempty"` // default 1
+	Action              string   `yaml:"action,omitempty"`               // "skip" | "clear_fields" | "delete"
+	Fields              []string `yaml:"fields,omitempty"`               // for clear_fields
+	AfterMissingRuns    int      `yaml:"after_missing_runs,omitempty"`   // default 1
+	AllowDestructive    bool     `yaml:"allow_destructive_actions,omitempty"` // required to execute delete
 }
 
 // SafetyConfig defines blast-radius limits.

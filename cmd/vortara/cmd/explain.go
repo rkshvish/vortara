@@ -65,6 +65,14 @@ type explainSafety struct {
 	RequireApprovalAbove float64 `json:"require_approval_above,omitempty"`
 }
 
+type explainMissingInfo struct {
+	ConsecutiveMissing int    `json:"consecutive_missing"`
+	Threshold          int    `json:"threshold"`
+	ConfiguredAction   string `json:"configured_action"`
+	AllowDestructive   bool   `json:"allow_destructive_actions"`
+	Blocked            bool   `json:"blocked,omitempty"` // true when delete but allow_destructive_actions not set
+}
+
 type explainHistoryItem struct {
 	RunID    int64    `json:"run_id"`
 	Decision string   `json:"decision"`
@@ -86,6 +94,7 @@ type explainOutput struct {
 	UpdatedAt       string                        `json:"updated_at,omitempty"`
 	SourceFound     bool                          `json:"source_found"`
 	Decision        string                        `json:"decision"`
+	MissingInfo     *explainMissingInfo           `json:"missing_info,omitempty"`
 	Rules           []explainRuleTrace            `json:"rules,omitempty"`
 	FieldChanges    map[string]explainFieldChange `json:"field_changes,omitempty"`
 	RememberedState map[string]any                `json:"remembered_state,omitempty"`
@@ -128,6 +137,75 @@ func runExplain(_ *cobra.Command, args []string) error {
 	if currentMapped == nil && es == nil {
 		fmt.Fprintf(os.Stderr, "Entity %q not found in source or state for sync %q.\n", explainEntityKey, s.Name)
 		os.Exit(1)
+	}
+
+	// --- missing-from-source: entity is in state but not in the source ---
+	// Compute what the engine would do and return early with a focused summary.
+	if currentMapped == nil && es != nil {
+		out := explainOutput{
+			EntityKey:   explainEntityKey,
+			SyncName:    s.Name,
+			Destination: destType,
+			DestURL:     s.Destination.URL,
+			SourceFound: false,
+			DestID:      es.DestinationID,
+			Version:     es.Version,
+			LastDecision: es.LastDecision,
+			LastStatus:  es.LastStatus,
+			UpdatedAt:   es.UpdatedAt.UTC().Format(time.RFC3339),
+		}
+
+		threshold := s.OnMissingFrom.AfterMissingRuns
+		if threshold <= 0 {
+			threshold = 1
+		}
+		consecutive := es.ConsecutiveMissing + 1
+		configuredAction := strings.ToLower(s.OnMissingFrom.Action)
+		if configuredAction == "" {
+			configuredAction = "skip"
+		}
+
+		mi := &explainMissingInfo{
+			ConsecutiveMissing: consecutive,
+			Threshold:          threshold,
+			ConfiguredAction:   configuredAction,
+			AllowDestructive:   s.OnMissingFrom.AllowDestructive,
+		}
+
+		if consecutive >= threshold && configuredAction == "delete" {
+			if !s.OnMissingFrom.AllowDestructive {
+				mi.Blocked = true
+				out.Decision = "blocked"
+			} else if isArchiveDestination(s.Destination.Type) {
+				out.Decision = "archive"
+			} else {
+				out.Decision = "delete"
+			}
+		} else if consecutive >= threshold {
+			out.Decision = configuredAction
+		} else {
+			out.Decision = fmt.Sprintf("missing (%d/%d runs)", consecutive, threshold)
+		}
+		out.MissingInfo = mi
+
+		history, _ := store.GetDecisionHistory(ctx, s.Name, destType, explainEntityKey, 10)
+		for _, ev := range history {
+			out.RecentHistory = append(out.RecentHistory, explainHistoryItem{
+				RunID:    ev.RunID,
+				Decision: ev.Decision,
+				Rules:    ev.TriggeredRules,
+				Reasons:  ev.Reasons,
+				At:       ev.CreatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+
+		if explainJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+		printExplain(out, s)
+		return nil
 	}
 
 	// --- build the decision input ---
@@ -367,7 +445,16 @@ func printExplain(out explainOutput, s synccfg.SyncSpec) {
 	if out.DestID != "" {
 		fmt.Printf("Dest ID:     %s\n", out.DestID)
 	}
-	if !out.SourceFound {
+	if !out.SourceFound && out.MissingInfo != nil {
+		mi := out.MissingInfo
+		fmt.Printf("\n  [entity not found in source — missing %d of %d run(s) required]\n", mi.ConsecutiveMissing, mi.Threshold)
+		fmt.Printf("  Configured action: %s\n", mi.ConfiguredAction)
+		if mi.AllowDestructive {
+			fmt.Printf("  allow_destructive_actions: true\n")
+		} else if mi.ConfiguredAction == "delete" {
+			fmt.Printf("  allow_destructive_actions: NOT SET — archive is blocked\n")
+		}
+	} else if !out.SourceFound {
 		fmt.Println("\n  [source row not available — showing stored state]")
 	}
 	if out.Version > 0 {
@@ -391,8 +478,19 @@ func printExplain(out explainOutput, s synccfg.SyncSpec) {
 		}
 	}
 
-	// Decision.
-	fmt.Printf("\nDecision: %s\n", strings.ToUpper(out.Decision))
+	// Decision — with archive context for missing entities.
+	decisionLabel := strings.ToUpper(out.Decision)
+	if out.MissingInfo != nil && out.Decision == "archive" && out.DestID != "" {
+		destLabel := out.Destination
+		if isArchiveDestination(out.Destination) {
+			destLabel = strings.Title(out.Destination) //nolint:staticcheck // Title is fine here
+		}
+		decisionLabel += fmt.Sprintf("\nReason:   missing from source for %d run(s)\nDestination: %s contact %s",
+			out.MissingInfo.ConsecutiveMissing, destLabel, out.DestID)
+	} else if out.MissingInfo != nil && out.Decision == "blocked" {
+		decisionLabel = "BLOCKED\nReason:   on_missing_from_source.allow_destructive_actions not set to true"
+	}
+	fmt.Printf("\nDecision: %s\n", decisionLabel)
 
 	// Rule trace.
 	if len(out.Rules) > 0 {
