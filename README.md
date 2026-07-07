@@ -1,8 +1,12 @@
 # Vortara
 
+> **Status: early MVP.** Vortara is ready for local demos and design-partner feedback, not production CRM workloads yet.
+
 Vortara is a programmable-state Reverse ETL engine.
 
 It lets you define *when* records create, update, skip, fail, replay, or trigger actions — and explain every decision before mutating production systems.
+
+Vortara runs as a Go CLI and keeps sync state in your own infrastructure, starting with SQLite for local and self-hosted workflows.
 
 ```
 make demo
@@ -74,8 +78,9 @@ The demo runs a complete failure → DLQ → replay cycle against a local Postgr
   dest:      http://localhost:18081/webhook
 
   Rules evaluated:
-    ✓ new-lead      [→ create] matched, not selected (first-match-wins)
-    ✓ score-changed [→ update] matched, selected
+    ✗ new-lead       [→ create] did not match
+    ✗ became-sql     [→ update] did not match
+    ✓ score-changed  [→ update] matched, selected
 
   Field changes:
     leadScore   75 → 95
@@ -95,10 +100,9 @@ go version
 
 # Docker (for demo Postgres)
 docker info
-
-# psql client (for seed step)
-psql --version
 ```
+
+Docker is required for the demo Postgres instance. A local `psql` client is only needed if you want to inspect the demo database manually.
 
 ## Install
 
@@ -132,7 +136,7 @@ A sync spec has four sections:
 
 **Decisions** — rules that evaluate the current row against remembered state. First match wins. Default is `skip`.
 
-**Destination** — where to deliver the payload (`restapi` today; HubSpot, Salesforce, Postgres coming).
+**Destination** — where to deliver the payload (`restapi` today; HubSpot and Salesforce are planned).
 
 ```yaml
 sync:
@@ -187,6 +191,18 @@ sync:
       path: ./dlq/pql.dlq.jsonl
       on_status: [500, 502, 503]
 ```
+
+---
+
+## Why Vortara?
+
+Most Reverse ETL systems hide state internally. Vortara makes state a product surface:
+
+- `diff` shows what would change before delivery.
+- `explain` shows why one entity will create, update, skip, or replay.
+- Inline state tests let you test activation rules in CI without a live source.
+- DLQ + replay gives failed rows a recovery path instead of silent loss.
+- Safety limits stop large accidental mutations before any row is delivered.
 
 ---
 
